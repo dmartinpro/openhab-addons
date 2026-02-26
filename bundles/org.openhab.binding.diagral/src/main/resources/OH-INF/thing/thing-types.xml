@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<thing:thing-descriptions bindingId="diagral"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:thing="https://openhab.org/schemas/thing-description/v1.0.0"
+	xsi:schemaLocation="https://openhab.org/schemas/thing-description/v1.0.0 https://openhab.org/schemas/thing-description-1.0.0.xsd">
+
+	<!-- Diagral Bridge -->
+	<bridge-type id="bridge">
+		<label>Diagral Alarm Bridge</label>
+		<description>Connection to Diagral alarm system cloud API</description>
+		<config-description-ref uri="thing-type:diagral:bridge"/>
+	</bridge-type>
+
+	<!-- Alarm System Thing -->
+	<thing-type id="alarm-system">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Alarm System</label>
+		<description>Main alarm system control and status</description>
+
+		<channels>
+			<channel id="armed-status" typeId="armed-status"/>
+			<channel id="mode-control" typeId="mode-control"/>
+			<channel id="anomalies-present" typeId="anomalies-present"/>
+			<channel id="anomaly-count" typeId="anomaly-count"/>
+			<channel id="central-low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>serialId</representation-property>
+	</thing-type>
+
+	<!-- Motion Sensor Thing -->
+	<thing-type id="motion-sensor">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Motion Sensor</label>
+		<description>Motion detection sensor</description>
+
+		<channels>
+			<channel id="motion" typeId="system.motion"/>
+			<channel id="enabled" typeId="device-enabled"/>
+			<!--channel id="battery-level" typeId="system.battery-level"/ -->
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Contact Sensor Thing -->
+	<thing-type id="contact-sensor">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Contact Sensor</label>
+		<description>Contact/door sensor</description>
+
+		<channels>
+			<channel id="contact" typeId="system.contact"/>
+			<channel id="enabled" typeId="device-enabled"/>
+			<!--channel id="battery-level" typeId="system.battery-level"/ -->
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Device Group Thing -->
+	<thing-type id="group">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Device Group</label>
+		<description>Group of devices that can be controlled together</description>
+
+		<channels>
+			<channel id="active" typeId="group-active"/>
+			<channel id="status" typeId="group-status"/>
+		</channels>
+
+		<representation-property>groupId</representation-property>
+		<config-description-ref uri="thing-type:diagral:group"/>
+	</thing-type>
+
+	<!-- Channel Type Definitions -->
+
+	<channel-type id="armed-status">
+		<item-type>String</item-type>
+		<label>Armed Status</label>
+		<description>Current armed status of the alarm system</description>
+		<state readOnly="true">
+			<options>
+				<option value="OFF">Off</option>
+				<option value="FULL">Full</option>
+				<option value="PRESENCE">Presence</option>
+				<option value="PARTIAL1">Partial 1</option>
+				<option value="PARTIAL2">Partial 2</option>
+			</options>
+		</state>
+	</channel-type>
+
+	<channel-type id="mode-control">
+		<item-type>String</item-type>
+		<label>Mode Control</label>
+		<description>Control the alarm system mode</description>
+		<command>
+			<options>
+				<option value="OFF">Disarm</option>
+				<option value="FULL">Arm Full</option>
+				<option value="PRESENCE">Presence Mode</option>
+				<option value="PARTIAL1">Partial Mode 1</option>
+				<option value="PARTIAL2">Partial Mode 2</option>
+			</options>
+		</command>
+	</channel-type>
+
+	<channel-type id="anomalies-present">
+		<item-type>Switch</item-type>
+		<label>Anomalies Present</label>
+		<description>Indicates if any anomalies are present in the system</description>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="anomaly-count">
+		<item-type>Number</item-type>
+		<label>Anomaly Count</label>
+		<description>Number of active anomalies in the system</description>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="device-enabled">
+		<item-type>Switch</item-type>
+		<label>Device Enabled</label>
+		<description>Indicates if the device is enabled</description>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="group-active">
+		<item-type>Switch</item-type>
+		<label>Group Active</label>
+		<description>Group activation state</description>
+	</channel-type>
+
+	<channel-type id="group-status">
+		<item-type>String</item-type>
+		<label>Group Status</label>
+		<description>Group status description</description>
+		<state readOnly="true"/>
+	</channel-type>
+
+</thing:thing-descriptions>
