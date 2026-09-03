@@ -43,16 +43,29 @@ public class DiagralTransmitterHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * @return always {@code null} - the Diagral API has no enable/disable action for generic transmitters
+     */
     @Override
     protected @Nullable String getProductType() {
         return null;
     }
 
+    /**
+     * @param config the system configuration
+     * @return the {@code transmitters} list from the configuration (includes plugs; this handler is only
+     *         ever assigned to non-plug devices by discovery)
+     */
     @Override
     protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
         return config.transmitters;
     }
 
+    /**
+     * No-op - transmitters have no channels beyond the base {@code enabled}/{@code low-battery} ones.
+     *
+     * @param device the device data from the API (unused)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Transmitters have no channels beyond the base enabled/low-battery ones

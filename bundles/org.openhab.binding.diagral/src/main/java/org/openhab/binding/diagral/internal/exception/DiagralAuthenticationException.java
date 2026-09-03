@@ -18,6 +18,14 @@ import org.eclipse.jdt.annotation.Nullable;
 /**
  * The {@link DiagralAuthenticationException} is thrown when authentication with the Diagral API fails.
  *
+ * <p>
+ * Covers both the initial login/API-key-generation flow ({@code DiagralHttpClient.authenticate()}) and a
+ * mid-session credential failure detected during a normal API call (an HTTP 400/401/403 response, which
+ * {@code DiagralHttpClient} maps to this exception after clearing the stored API keys). Catching this
+ * specifically (rather than the base {@link DiagralException}) is how {@code DiagralBridgeHandler}
+ * distinguishes "credentials are bad, re-authenticate" from a transient network/server problem.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -25,10 +33,21 @@ public class DiagralAuthenticationException extends DiagralException {
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Constructs a new exception with the given message and no cause.
+     *
+     * @param message a human-readable description of the authentication failure
+     */
     public DiagralAuthenticationException(String message) {
         super(message);
     }
 
+    /**
+     * Constructs a new exception with the given message, wrapping an underlying cause.
+     *
+     * @param message a human-readable description of the authentication failure
+     * @param cause the underlying exception that triggered this failure, or null if there is none
+     */
     public DiagralAuthenticationException(String message, @Nullable Throwable cause) {
         super(message, cause);
     }

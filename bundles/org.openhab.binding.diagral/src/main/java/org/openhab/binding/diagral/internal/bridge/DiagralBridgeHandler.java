@@ -54,6 +54,18 @@ import org.slf4j.LoggerFactory;
 /**
  * The {@link DiagralBridgeHandler} manages the connection to the Diagral cloud API.
  *
+ * <p>
+ * Owns the {@link DiagralHttpClient}/{@link DiagralAuthenticationManager} pair for one Diagral box, runs
+ * the periodic polling loop that keeps the bridge and every child thing up to date (see {@link #poll()}
+ * and {@link DiagralRefreshableHandler}), and is the single point child thing handlers go through to
+ * talk to the cloud - they never call {@link DiagralHttpClient} directly, only the {@code getXxx()}/
+ * {@code setXxx()}/{@code enableDevice()}/etc. methods here, each of which null-tolerantly wraps the
+ * underlying HTTP client and logs+swallows failures rather than propagating checked exceptions to
+ * handler code. Also implements {@link DiagralClient} to let {@code DiagralDiscoveryService} register
+ * itself, and {@link org.openhab.core.thing.binding.ConfigStatusBridgeHandler} to report missing bridge
+ * configuration fields in the UI.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -79,11 +91,27 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private @Nullable DiagralSystemStatus cachedSystemStatus;
     private long cachedSystemStatusTimestamp;
 
+    /**
+     * Constructs a new bridge handler.
+     *
+     * @param bridge the bridge thing to handle
+     * @param httpClient the shared Jetty HTTP client to use for all requests (obtained from openHAB's
+     *            {@code HttpClientFactory} by {@code DiagralHandlerFactory})
+     */
     public DiagralBridgeHandler(Bridge bridge, HttpClient httpClient) {
         super(bridge);
         this.httpClient = httpClient;
     }
 
+    /**
+     * Validates the bridge configuration and, if valid, kicks off authentication and polling.
+     *
+     * <p>
+     * Per the openHAB threading guideline, this returns immediately - the actual network calls
+     * (authentication, first poll) are pushed onto {@code scheduler} rather than run inline, since
+     * {@code initialize()} must not block.
+     * </p>
+     */
     @Override
     public void initialize() {
         logger.debug("Initializing Diagral bridge handler");
@@ -115,6 +143,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         });
     }
 
+    /**
+     * Stops polling, best-effort deletes the current API key from the Diagral account, and releases all
+     * held state.
+     *
+     * <p>
+     * The API-key deletion is fire-and-forget on {@code scheduler} (see the inline comment below) so
+     * this method itself stays non-blocking, per the openHAB threading guideline.
+     * </p>
+     */
     @Override
     public void dispose() {
         logger.debug("Disposing Diagral bridge handler");
@@ -143,6 +180,17 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         super.dispose();
     }
 
+    /**
+     * Handles a command sent to one of the bridge's own channels.
+     *
+     * <p>
+     * A no-op: the {@code bridge} thing type declares no channels of its own (see {@code
+     * thing-types.xml}) - all commands are handled by child things instead.
+     * </p>
+     *
+     * @param channelUID the channel the command was sent to
+     * @param command the command
+     */
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         // Bridge has no channels to handle
@@ -197,7 +245,19 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Polls the Diagral API for status updates
+     * Polls the Diagral API for status updates.
+     *
+     * <p>
+     * Runs on {@code scheduler} at the configured {@code refreshInterval} (see {@link
+     * #startPolling(int)}), and is also triggered immediately, off-cycle, after any command that
+     * changes device/system state (e.g. {@link #setSystemMode}, {@link #enableDevice}) so the UI
+     * reflects the change promptly rather than waiting for the next scheduled tick. On success, keeps
+     * the bridge {@code ONLINE} and calls {@link #refreshChildHandlers()}. On an authentication failure,
+     * schedules a re-authentication attempt rather than going offline immediately. On any other failure,
+     * logs a warning and leaves the bridge status untouched - a single failed poll doesn't flip the
+     * bridge offline (see the {@code TODO} below for the known gap: there's currently no
+     * consecutive-failure counter to eventually do so).
+     * </p>
      */
     private void poll() {
         DiagralHttpClient client = diagralHttpClient;
@@ -268,12 +328,24 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Inspired by Hue add-on.
-     * 
-     * TODO: complete this function
-     * 
-     * @param listener
-     * @return
+     * Registers the discovery service so it can be notified of already-known devices.
+     *
+     * <p>
+     * Pattern inspired by the Hue binding's bridge/discovery-service registration. Only one discovery
+     * service can be registered at a time (a new one is rejected while another is already registered).
+     * </p>
+     *
+     * <p>
+     * <b>Known gap (see {@code CLAUDE.md} "Known incomplete areas"):</b> this currently only stores the
+     * listener reference - it doesn't push already-discovered devices to it immediately (the commented-
+     * out calls below are a placeholder for that). In practice this isn't a functional problem because
+     * {@code DiagralDiscoveryService.startScan()} always re-reads the full configuration itself rather
+     * than relying on a push from here.
+     * </p>
+     *
+     * @param listener the discovery service to register
+     * @return {@code true} if the listener was registered, {@code false} if another listener was already
+     *         registered
      */
     @Override
     public boolean registerDiscoveryListener(DiagralDiscoveryService listener) {
@@ -288,6 +360,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         return false;
     }
 
+    /**
+     * Unregisters the currently-registered discovery service, if any.
+     *
+     * @return {@code true} if a listener was registered and has now been removed, {@code false} if none
+     *         was registered
+     */
     @Override
     public boolean unregisterDiscoveryListener() {
         if (discoveryService != null) {
@@ -333,6 +411,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     /**
      * Gets the anomalies currently reported for the system.
      *
+     * <p>
+     * Unlike {@link #getSystemConfiguration()}/{@link #getSystemDetails()}, this is never cached - it's
+     * fetched fresh from {@link DiagralHttpClient#getAnomalies()} on every call, since anomaly state is
+     * live rather than static configuration. Used by {@code DiagralSystemHandler} to drive the
+     * {@code anomaly-count}/{@code anomalies-present} channels, and internally by {@link
+     * DiagralHttpClient#actionProduct} to verify whether an enable/disable action that returned an
+     * error actually took effect.
+     * </p>
+     *
      * @return the anomalies, or null if not available
      */
     public @Nullable DiagralAnomalies getAnomalies() {
@@ -350,7 +437,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Gets the system configuration (cached)
+     * Gets the system configuration (cached).
+     *
+     * <p>
+     * The configuration (device lists, groups, etc.) rarely changes, so it's fetched once and cached
+     * indefinitely - call {@link #refreshConfiguration()} to force a fresh fetch, which happens
+     * automatically after a successful (or possibly-successful) {@link #enableDevice}/{@link
+     * #disableDevice} call. This is what every thing handler's {@code refreshStatus()} reads its device
+     * data from.
+     * </p>
      *
      * @return the system configuration, or null if not available
      */
@@ -374,7 +469,14 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Gets the system details (cached)
+     * Gets the system details (cached).
+     *
+     * <p>
+     * Cached indefinitely once fetched (no explicit refresh method exists for this one, unlike {@link
+     * #getSystemConfiguration()}, since these fields - firmware version, IP address, etc. - change even
+     * less often). Used only by {@code DiagralDiscoveryService.discoverAlarmSystem()} to populate
+     * discovery-time thing properties.
+     * </p>
      *
      * @return the system details, or null if not available
      */
@@ -398,7 +500,13 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Sets the alarm system mode
+     * Sets the alarm system mode.
+     *
+     * <p>
+     * Called by {@code DiagralSystemHandler} in response to a command on the {@code mode-control}
+     * channel. Failures are logged and swallowed rather than propagated - there's no channel to report
+     * a command failure back through, so a warning/error in the log is the only feedback.
+     * </p>
      *
      * @param mode the mode to set (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2)
      */
@@ -419,7 +527,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Activates a device group
+     * Activates a device group.
+     *
+     * <p>
+     * Called by {@code DiagralGroupHandler} in response to an {@code ON} command on the group's
+     * {@code active} channel.
+     * </p>
      *
      * @param groupId the group ID to activate
      */
@@ -439,7 +552,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Disables a device group
+     * Disables a device group.
+     *
+     * <p>
+     * Called by {@code DiagralGroupHandler} in response to an {@code OFF} command on the group's
+     * {@code active} channel.
+     * </p>
      *
      * @param groupId the group ID to disable
      */
@@ -460,6 +578,11 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
     /**
      * Enables (un-inhibits) a device.
+     *
+     * <p>
+     * Called by {@code DiagralSensorHandler} (and its siren/keypad/plug subclasses) in response to an
+     * {@code ON} command on the device's {@code enabled} channel.
+     * </p>
      *
      * @param productType the product type (e.g. SENSOR, ALARM, COMMAND, PLUG)
      * @param productId the per-category numeric device index
@@ -489,6 +612,11 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     /**
      * Disables (inhibits) a device.
      *
+     * <p>
+     * Called by {@code DiagralSensorHandler} (and its siren/keypad/plug subclasses) in response to an
+     * {@code OFF} command on the device's {@code enabled} channel.
+     * </p>
+     *
      * @param productType the product type (e.g. SENSOR, ALARM, COMMAND, PLUG)
      * @param productId the per-category numeric device index
      */
@@ -515,18 +643,39 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Refreshes the cached configuration
+     * Forces a fresh fetch of the system configuration on the next call to {@link
+     * #getSystemConfiguration()}, discarding whatever is currently cached.
+     *
+     * <p>
+     * Invalidates the cache and immediately re-fetches (synchronously, on the calling thread) so the
+     * cache is warm again by the time this method returns.
+     * </p>
      */
     public void refreshConfiguration() {
         cachedConfiguration = null;
         getSystemConfiguration();
     }
 
+    /**
+     * Advertises the OSGi services this bridge handler contributes.
+     *
+     * @return a collection containing just {@link DiagralDiscoveryService}, so the openHAB framework
+     *         registers it as this bridge's discovery service
+     */
     @Override
     public Collection<Class<? extends ThingHandlerService>> getServices() {
         return List.of(DiagralDiscoveryService.class);
     }
 
+    /**
+     * Reports configuration problems with the bridge's own thing configuration, so the openHAB UI can
+     * surface them (via {@code i18n} message keys such as {@link
+     * org.openhab.binding.diagral.internal.DiagralBindingConstants#USERNAME_MISSING}) even before the
+     * bridge has attempted to connect.
+     *
+     * @return one {@link ConfigStatusMessage} per missing required field (username, password, PIN code,
+     *         serial ID), or an empty collection if all required fields are present
+     */
     @Override
     public Collection<ConfigStatusMessage> getConfigStatus() {
         diagralBridgeConfig = getConfigAs(DiagralBridgeConfiguration.class);

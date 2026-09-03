@@ -44,16 +44,30 @@ public class DiagralPlugHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * @return {@link org.openhab.binding.diagral.internal.DiagralBindingConstants#PRODUCT_TYPE_PLUG}
+     */
     @Override
     protected @Nullable String getProductType() {
         return PRODUCT_TYPE_PLUG;
     }
 
+    /**
+     * @param config the system configuration
+     * @return the {@code transmitters} list from the configuration - plugs are discovered from the same
+     *         API category as generic transmitters, distinguished only by the {@code isPlug} flag on each
+     *         device (see {@link org.openhab.binding.diagral.internal.discovery.DiagralDiscoveryService})
+     */
     @Override
     protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
         return config.transmitters;
     }
 
+    /**
+     * No-op - plugs have no channels beyond the base {@code enabled}/{@code low-battery} ones.
+     *
+     * @param device the device data from the API (unused)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Plugs have no channels beyond the base enabled/low-battery ones

@@ -71,6 +71,10 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
         super(thing);
     }
 
+    /**
+     * Reads and validates the device configuration, checks bridge availability, and performs an initial
+     * status refresh.
+     */
     @Override
     public void initialize() {
         logger.debug("Initializing Diagral sensor handler");
@@ -105,6 +109,14 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
         refreshStatus();
     }
 
+    /**
+     * Handles commands sent to this device's channels: {@link RefreshType} triggers a status refresh, and
+     * an {@code OnOffType} on {@code enabled} enables/disables the device via the bridge. Subclasses may
+     * override to handle additional channels, calling {@code super.handleCommand(...)} first.
+     *
+     * @param channelUID the channel the command targets
+     * @param command the command received
+     */
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         if (command instanceof RefreshType) {
@@ -289,6 +301,12 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
         return null;
     }
 
+    /**
+     * Mirrors this thing's status to the bridge's status: goes {@code ONLINE} (and refreshes) when the
+     * bridge comes online, goes {@code OFFLINE} otherwise.
+     *
+     * @param bridgeStatusInfo the bridge's new status
+     */
     @Override
     public void bridgeStatusChanged(org.openhab.core.thing.ThingStatusInfo bridgeStatusInfo) {
         if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE) {

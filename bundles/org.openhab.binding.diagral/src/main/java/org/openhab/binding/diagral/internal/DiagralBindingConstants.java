@@ -19,6 +19,16 @@ import org.openhab.core.thing.ThingTypeUID;
  * The {@link DiagralBindingConstants} class defines common constants, which are
  * used across the whole binding.
  *
+ * <p>
+ * Centralizes everything that would otherwise be a magic string/UID scattered across the codebase:
+ * thing-type UIDs (must match the IDs in {@code thing-types.xml}), channel IDs, Diagral cloud API base
+ * URL/endpoint paths/request headers, arm-mode and per-device "product type" strings used by the
+ * enable/disable API, config parameter and thing property keys, device type/reference codes used to
+ * classify discovered sensors, and config-status message keys. Grouped into commented sections below;
+ * add new constants to the matching section rather than creating a new one, and check here first before
+ * hardcoding a string literal elsewhere in the binding.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault

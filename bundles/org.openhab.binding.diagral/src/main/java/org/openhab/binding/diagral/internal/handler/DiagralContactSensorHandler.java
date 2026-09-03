@@ -48,6 +48,11 @@ public class DiagralContactSensorHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * Updates the {@code contact} channel.
+     *
+     * @param device the device data from the API (unused - see below)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Contact sensors don't provide real-time contact status from the API

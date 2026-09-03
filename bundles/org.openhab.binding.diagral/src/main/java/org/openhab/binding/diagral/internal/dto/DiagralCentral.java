@@ -20,7 +20,16 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralCentral} represents the alarm central device in the Diagral installation.
+ * The {@link DiagralCentral} represents the alarm central unit's own configuration and status, as
+ * returned in the {@code centralInformation} field of the {@code /systems/{serialId}/configurations}
+ * response.
+ *
+ * <p>
+ * {@link #anomalies} is a map of central-unit-level anomaly flags, keyed by the same alert names as
+ * {@code DiagralDevice#anomalies} (e.g. {@code mainPowerSupplyAlert}); {@code
+ * DiagralSystemHandler.updateChannels()} checks {@code mainPowerSupplyAlert}/{@code
+ * secondaryPowerSupplyAlert} here to drive the alarm system's {@code central-low-battery} channel.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

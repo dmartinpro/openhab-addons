@@ -73,6 +73,14 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
 
     /**
      * Creates a new DiagralDiscoveryService.
+     *
+     * <p>
+     * Declares every non-bridge thing type this binding supports as discoverable, a 30-second scan
+     * timeout, and {@code true} for the "background discovery enabled by default" flag - though note
+     * this service doesn't actually implement background discovery ({@link #startScan()} only runs when
+     * explicitly triggered from the inbox or by a bridge coming online); there's no periodic
+     * re-scan.
+     * </p>
      */
     public DiagralDiscoveryService() {
         super(DiagralBridgeHandler.class,
@@ -82,6 +90,16 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
                 DISCOVERY_TIMEOUT_SECONDS, true);
     }
 
+    /**
+     * Runs one discovery scan: fetches the bridge's current system configuration and reports a
+     * discovery result for the alarm system, every device category, and every group found in it.
+     *
+     * <p>
+     * Requires the bridge to already be online with a fetched configuration - if either isn't available
+     * yet, this logs a warning and returns without discovering anything (there's no retry; the user has
+     * to re-trigger the scan once the bridge comes online).
+     * </p>
+     */
     @Override
     protected void startScan() {
         logger.debug("Starting Diagral device discovery");
@@ -166,6 +184,20 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         logger.debug("Discovered alarm system: {}", thingUID);
     }
 
+    /**
+     * Null-safely substitutes a default value.
+     *
+     * <p>
+     * Used by {@link #discoverAlarmSystem} to avoid putting {@code null} into the discovery result's
+     * properties map (which doesn't accept null values) for any of {@link DiagralSystemDetails}'s many
+     * optional fields.
+     * </p>
+     *
+     * @param <T> the value type
+     * @param value the value, possibly null
+     * @param defaultValue the value to use if {@code value} is null
+     * @return {@code value} if non-null, otherwise {@code defaultValue}
+     */
     static <T> T getValueOrDefault(T value, T defaultValue) {
         return value == null ? defaultValue : value;
     }
@@ -386,15 +418,29 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         return String.join(", ", modes);
     }
 
+    /**
+     * Null-safely checks whether a group index is present in a group-membership list.
+     *
+     * @param groupIndices the membership list (e.g. {@code config.presenceGroup}), possibly null
+     * @param groupIndex the group index to look for
+     * @return {@code true} if the list is non-null and contains {@code groupIndex}
+     */
     private static boolean containsGroup(@Nullable List<Integer> groupIndices, int groupIndex) {
         return groupIndices != null && groupIndices.contains(groupIndex);
     }
 
     /**
-     * Determines the appropriate thing type for a device based on its type and subtype.
+     * Determines the appropriate thing type for a device found in the API's {@code sensors} list, based
+     * on its type code and reference code.
+     *
+     * <p>
+     * Only used by {@link #discoverSensors} - sirens/keypads/transmitters/cameras each come from their
+     * own separate API list and always map to one fixed thing type (see {@link #discoverSirens} etc.),
+     * so they don't need this per-device classification.
+     * </p>
      *
      * @param device the device
-     * @return the thing type UID, or null if unknown
+     * @return the thing type UID, or null if the device's type/refCode combination isn't recognized
      */
     private @Nullable ThingTypeUID getThingTypeForDevice(DiagralDevice device) {
         String type = device.type;
@@ -418,10 +464,16 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
             return THING_TYPE_MOTION_SENSOR;
         }
 
-        // Could add more device types here (cameras, sirens, etc.) when implemented
+        // Add new refCode-based branches here if the "sensors" list ever contains a type code this
+        // binding doesn't yet recognize
         return null;
     }
 
+    /**
+     * Records the bridge's thing UID and registers this service as the bridge's discovery listener.
+     *
+     * @see DiagralBridgeHandler#registerDiscoveryListener(DiagralDiscoveryService)
+     */
     @Override
     public void initialize() {
         bridgeUID = thingHandler.getThing().getUID();
@@ -429,6 +481,11 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         super.initialize();
     }
 
+    /**
+     * Cleans up on service shutdown: delegates to the superclass, then removes any inbox entries left
+     * over from before the last scan (devices that were discovered previously but are no longer present
+     * in the Diagral configuration).
+     */
     @Override
     public void dispose() {
         super.dispose();

@@ -15,7 +15,16 @@ package org.openhab.binding.diagral.internal;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 
 /**
- * The {@link DiagralConfiguration} class contains fields mapping device configuration parameters.
+ * The {@link DiagralConfiguration} class contains fields mapping device and group thing configuration
+ * parameters.
+ *
+ * <p>
+ * Shared by every non-bridge, non-alarm-system thing type (sensors, sirens, keypads, plugs,
+ * transmitters, cameras, and groups) via each handler's call to {@code
+ * getConfigAs(DiagralConfiguration.class)} - device things only use {@link #deviceId}/{@link
+ * #deviceIndex} (see {@link #isValidDevice()}), group things only use {@link #groupId} (see {@link
+ * #isValidGroup()}); each handler only reads the fields relevant to its own thing type.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */
