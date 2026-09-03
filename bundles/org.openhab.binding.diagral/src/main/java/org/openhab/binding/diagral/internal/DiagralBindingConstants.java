@@ -66,6 +66,8 @@ public class DiagralBindingConstants {
     public static final String API_ENDPOINT_ACTIVATE_GROUP = "/activate_group";
     public static final String API_ENDPOINT_DISABLE_GROUP = "/disable_group";
     public static final String API_ENDPOINT_ANOMALIES = "/anomalies";
+    public static final String API_ENDPOINT_ENABLE = "/enable";
+    public static final String API_ENDPOINT_DISABLE = "/disable";
 
     // Diagral API Request Headers
     public static final String HEADER_X_HMAC = "X-HMAC";
@@ -82,6 +84,14 @@ public class DiagralBindingConstants {
     public static final String MODE_PARTIAL1 = "PARTIAL1";
     public static final String MODE_PARTIAL2 = "PARTIAL2";
 
+    // Diagral Product Types (used for the per-device enable/disable API)
+    public static final String PRODUCT_TYPE_CENTRAL = "CENTRAL";
+    public static final String PRODUCT_TYPE_SENSOR = "SENSOR";
+    public static final String PRODUCT_TYPE_COMMAND = "COMMAND";
+    public static final String PRODUCT_TYPE_ALARM = "ALARM";
+    public static final String PRODUCT_TYPE_BOX = "BOX";
+    public static final String PRODUCT_TYPE_PLUG = "PLUG";
+
     // Configuration Properties
     public static final String CONFIG_USERNAME = "username";
     public static final String CONFIG_PASSWORD = "password";
@@ -89,6 +99,7 @@ public class DiagralBindingConstants {
     public static final String CONFIG_PIN_CODE = "pinCode";
     public static final String CONFIG_REFRESH_INTERVAL = "refreshInterval";
     public static final String CONFIG_DEVICE_ID = "deviceId";
+    public static final String CONFIG_DEVICE_INDEX = "deviceIndex";
     public static final String CONFIG_GROUP_ID = "groupId";
 
     // Thing Properties
@@ -147,4 +158,8 @@ public class DiagralBindingConstants {
     public static final String DEVICE_ANOMALY_MEDIA_GSM_ALERT = "mediaGSMAlert";
     public static final String DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT = "mainPowerSupplyAlert";
     public static final String DEVICE_ANOMALY_SECOND_POWERSUPPLY_ALERT = "secondaryPowerSupplyAlert";
+
+    // Anomaly name reported by the /anomalies endpoint's anomaly_names list (distinct shape from the
+    // configuration endpoint's per-device anomalies map above)
+    public static final String DEVICE_ANOMALY_NAME_INHIBITED = "inhibited";
 }

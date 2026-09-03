@@ -138,8 +138,7 @@
 	<channel-type id="device-enabled">
 		<item-type>Switch</item-type>
 		<label>Device Enabled</label>
-		<description>Indicates if the device is enabled</description>
-		<state readOnly="true"/>
+		<description>Enables/disables (un-inhibits/inhibits) the device</description>
 	</channel-type>
 
 	<channel-type id="group-active">

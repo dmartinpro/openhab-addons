@@ -54,10 +54,11 @@ import org.slf4j.LoggerFactory;
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public abstract class DiagralSensorHandler extends BaseThingHandler {
+public abstract class DiagralSensorHandler extends BaseThingHandler implements DiagralRefreshableHandler {
 
     private final Logger logger = LoggerFactory.getLogger(DiagralSensorHandler.class);
     private @Nullable String deviceId;
+    private int deviceIndex = -1;
 
     /**
      * Constructs a new DiagralSensorHandler.
@@ -80,6 +81,7 @@ public abstract class DiagralSensorHandler extends BaseThingHandler {
         }
 
         this.deviceId = config.deviceId;
+        this.deviceIndex = config.deviceIndex;
 
         // Check if bridge is available
         Bridge bridge = getBridge();
@@ -108,13 +110,59 @@ public abstract class DiagralSensorHandler extends BaseThingHandler {
             return;
         }
 
+        if (CHANNEL_ENABLED.equals(channelUID.getId()) && command instanceof OnOffType onOffCommand) {
+            setDeviceEnabled(onOffCommand == OnOffType.ON);
+            return;
+        }
+
         // Subclasses can override to handle specific commands
+    }
+
+    /**
+     * Enables or disables (un-inhibits/inhibits) this device via the bridge.
+     *
+     * @param enabled true to enable, false to disable
+     */
+    private void setDeviceEnabled(boolean enabled) {
+        DiagralBridgeHandler bridgeHandler = getBridgeHandler();
+        if (bridgeHandler == null) {
+            logger.warn("Cannot set device enabled state - bridge handler not available");
+            return;
+        }
+
+        if (deviceIndex < 0) {
+            logger.warn("Cannot set device enabled state - device index not available");
+            return;
+        }
+
+        logger.debug("Setting device {} to {}", deviceId, enabled ? "enabled" : "disabled");
+
+        if (enabled) {
+            bridgeHandler.enableDevice(getProductType(), deviceIndex);
+        } else {
+            bridgeHandler.disableDevice(getProductType(), deviceIndex);
+        }
+    }
+
+    /**
+     * Gets the product type used for enable/disable API calls.
+     *
+     * <p>
+     * Subclasses should override this if they represent a different product category (e.g. sirens,
+     * keypads, plugs).
+     * </p>
+     *
+     * @return the product type
+     */
+    protected String getProductType() {
+        return PRODUCT_TYPE_SENSOR;
     }
 
     /**
      * Refreshes the sensor status from the bridge and updates all channels.
      */
-    protected void refreshStatus() {
+    @Override
+    public void refreshStatus() {
         String currentDeviceId = deviceId;
         if (currentDeviceId == null) {
             logger.debug("Cannot refresh status - device ID not set");

@@ -96,7 +96,7 @@ If you need to manually configure one:
 | Channel       | Type   | Read/Write | Description                                      |
 |---------------|--------|------------|--------------------------------------------------|
 | motion        | Switch | Read Only  | Motion detection state (ON=motion, OFF=no motion)|
-| enabled       | Switch | Read Only  | Device enabled state (ON=enabled, OFF=disabled)  |
+| enabled       | Switch | Read/Write | Device enabled state (ON=enabled, OFF=disabled); sending a command enables/disables (un-inhibits/inhibits) the device |
 | low-battery   | Switch | Read Only  | Low battery indicator (ON=low, OFF=normal)       |
 
 ### Contact Sensor Channels
@@ -104,7 +104,7 @@ If you need to manually configure one:
 | Channel       | Type    | Read/Write | Description                                      |
 |---------------|---------|------------|--------------------------------------------------|
 | contact       | Contact | Read Only  | Contact state (OPEN/CLOSED)                      |
-| enabled       | Switch  | Read Only  | Device enabled state (ON=enabled, OFF=disabled)  |
+| enabled       | Switch  | Read/Write | Device enabled state (ON=enabled, OFF=disabled); sending a command enables/disables (un-inhibits/inhibits) the device |
 | low-battery   | Switch  | Read Only  | Low battery indicator (ON=low, OFF=normal)       |
 
 ### Device Group Channels
@@ -207,7 +207,9 @@ sitemap diagral label="Diagral Alarm System" {
 }
 ```
 
-## Known Limitations
+## Known Limitations & Bugs
+
+### Limitations
 
 - **Cloud-only communication**: This binding uses the Diagral cloud API and requires internet connectivity. Local network communication is not supported.
 - **Polling-based updates**: Status updates are retrieved by polling the API at the configured refresh interval (default 60 seconds). Real-time push notifications are not available.
@@ -215,6 +217,20 @@ sitemap diagral label="Diagral Alarm System" {
 - **Authentication requirements**: You must have a valid Diagral account with cloud access enabled for your system.
 - **Device support**: Initial implementation focuses on alarm system control, motion sensors, contact sensors, and device groups. Other device types (cameras with video streaming, sirens, switches) may be added in future versions.
 - **Rate limiting**: The Diagral API may impose rate limits. If you experience issues, try increasing the refresh interval.
+
+### Known Bugs (Diagral Cloud API)
+
+- **Enable/disable action reports a false failure**: The Diagral cloud API's per-device enable/disable endpoint (used by the `enabled` channel on sensors, and internally identical for other device types) has been observed to consistently respond with an **HTTP 500 error and an empty response body even when it successfully applied the action**. This appears to be a bug in the Diagral cloud service itself, not something under this binding's control — it was verified by checking the device's real "inhibited" state via the `/anomalies` endpoint immediately before and after a "failed" call, which confirmed the action had actually taken effect both times.
+
+  The binding works around this: when this specific endpoint returns an HTTP 500, it verifies the device's actual resulting state via the anomalies endpoint before deciding whether to report a failure. If the verified state matches what was requested, the command is treated as successful (you'll see a `WARN` log entry noting the known API quirk, but the channel will update correctly).
+
+  If the state doesn't match, or verification itself isn't possible, the original error is still reported — this also happens if you check too soon: the `/anomalies` endpoint itself appears to be a periodically-refreshed snapshot on Diagral's side rather than a live query, and has been observed to lag the real device state by tens of seconds. In that case the binding conservatively reports a failure even though the command may have actually succeeded, rather than risk falsely reporting success. Either way, the device's real state is always re-synced on the next poll (whether or not the command was reported as successful), so the channel will self-correct shortly regardless.
+
+  You may occasionally see log lines like:
+  ```
+  WARN [internal.bridge.DiagralHttpClient] - Product 1 (SENSOR) action /disable returned HTTP 500 but the resulting device state was verified as applied - treating as a known Diagral API quirk, not a failure
+  ```
+  This is expected and does not indicate a problem with your setup.
 
 ## Troubleshooting
 

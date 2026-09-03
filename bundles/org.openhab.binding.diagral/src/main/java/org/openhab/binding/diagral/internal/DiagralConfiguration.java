@@ -28,6 +28,11 @@ public class DiagralConfiguration {
     public String deviceId = "";
 
     /**
+     * Per-category numeric device index, used for enable/disable API calls
+     */
+    public int deviceIndex = -1;
+
+    /**
      * Group ID for group things
      */
     public String groupId = "";

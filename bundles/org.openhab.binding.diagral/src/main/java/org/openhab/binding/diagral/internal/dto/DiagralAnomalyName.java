@@ -18,25 +18,16 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralAnomaly} represents an anomaly or alert in the Diagral system.
+ * The {@link DiagralAnomalyName} represents a single named anomaly code reported for a device.
  *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public class DiagralAnomaly {
+public class DiagralAnomalyName {
 
-    @SerializedName("type")
-    public @Nullable String type;
+    @SerializedName("id")
+    public int id;
 
-    @SerializedName("index")
-    public @Nullable Integer deviceIndex;
-
-    @SerializedName("label")
-    public @Nullable String deviceLabel;
-
-    @SerializedName("group")
-    public @Nullable Integer groupIndex;
-
-    @SerializedName("serial")
-    public @Nullable String serial;
+    @SerializedName("name")
+    public @Nullable String name;
 }
