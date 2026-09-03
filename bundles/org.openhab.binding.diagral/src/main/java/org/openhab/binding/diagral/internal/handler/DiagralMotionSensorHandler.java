@@ -48,6 +48,11 @@ public class DiagralMotionSensorHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * Updates the {@code motion} channel.
+     *
+     * @param device the device data from the API (unused - see below)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Motion sensors don't provide real-time motion status from the API

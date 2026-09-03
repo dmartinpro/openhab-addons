@@ -69,6 +69,9 @@ public class DiagralSystemHandler extends BaseThingHandler implements DiagralRef
         super(thing);
     }
 
+    /**
+     * Checks bridge availability and performs an initial status refresh.
+     */
     @Override
     public void initialize() {
         logger.debug("Initializing Diagral system handler");
@@ -93,6 +96,13 @@ public class DiagralSystemHandler extends BaseThingHandler implements DiagralRef
         refreshStatus();
     }
 
+    /**
+     * Handles commands sent to this system's channels: {@link RefreshType} triggers a status refresh, and
+     * a {@code StringType} on {@code mode-control} sets the alarm system mode via the bridge.
+     *
+     * @param channelUID the channel the command targets
+     * @param command the command received
+     */
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         if (command instanceof RefreshType) {
@@ -202,6 +212,12 @@ public class DiagralSystemHandler extends BaseThingHandler implements DiagralRef
         return null;
     }
 
+    /**
+     * Mirrors this thing's status to the bridge's status: goes {@code ONLINE} (and refreshes) when the
+     * bridge comes online, goes {@code OFFLINE} otherwise.
+     *
+     * @param bridgeStatusInfo the bridge's new status
+     */
     @Override
     public void bridgeStatusChanged(org.openhab.core.thing.ThingStatusInfo bridgeStatusInfo) {
         if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE) {

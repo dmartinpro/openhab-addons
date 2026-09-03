@@ -81,11 +81,31 @@ public class DiagralHandlerFactory extends BaseThingHandlerFactory {
         this.httpClient = httpClientFactory.getCommonHttpClient();
     }
 
+    /**
+     * Checks whether this factory can create a handler for the given thing type.
+     *
+     * @param thingTypeUID the thing type to check
+     * @return {@code true} if the thing type is one of the 10 types this binding supports
+     */
     @Override
     public boolean supportsThingType(ThingTypeUID thingTypeUID) {
         return SUPPORTED_THING_TYPES_UIDS.contains(thingTypeUID);
     }
 
+    /**
+     * Creates the handler instance for a given thing, based on its thing type.
+     *
+     * <p>
+     * This is the single place that maps a {@link ThingTypeUID} to its concrete handler class - add a
+     * new {@code else if} branch here (and to {@link #SUPPORTED_THING_TYPES_UIDS}) when introducing a
+     * new thing type.
+     * </p>
+     *
+     * @param thing the thing to create a handler for
+     * @return the new handler instance, or {@code null} if the thing's type isn't supported (shouldn't
+     *         happen in practice, since the framework only calls this for types {@link
+     *         #supportsThingType(ThingTypeUID)} reported as supported)
+     */
     @Override
     protected @Nullable ThingHandler createHandler(Thing thing) {
         ThingTypeUID thingTypeUID = thing.getThingTypeUID();

@@ -20,7 +20,18 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralDevice} represents a device in the Diagral system.
+ * The {@link DiagralDevice} represents a single device in the Diagral system - a sensor, siren, keypad
+ * ("command"), transmitter, or camera, all of which share this same JSON shape in the {@code
+ * /systems/{serialId}/configurations} response (see {@code DiagralSystemConfiguration}'s per-category
+ * list fields).
+ *
+ * <p>
+ * Not every field is populated for every category - notably {@link #id} (the API's {@code uid}) is only
+ * present for sensors; sirens, keypads, and transmitters are identified only by {@link #serial} (see
+ * {@link #getUniqueId()}). {@link #deviceIndex} is the per-category numeric index used by the
+ * enable/disable API (see {@code DiagralHttpClient.actionProduct()}), distinct from {@link #groupIndex}
+ * (which group the device belongs to) and {@link #id}/{@link #serial} (device identity).
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

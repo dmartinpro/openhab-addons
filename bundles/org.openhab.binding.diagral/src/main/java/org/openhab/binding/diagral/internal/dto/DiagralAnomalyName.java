@@ -18,7 +18,15 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralAnomalyName} represents a single named anomaly code reported for a device.
+ * The {@link DiagralAnomalyName} represents a single named anomaly code reported for a device, as found
+ * in a {@link DiagralAnomalyDetail}'s {@code anomaly_names} list.
+ *
+ * <p>
+ * {@link #name} values are free-form strings defined by the Diagral API (e.g. {@code "inhibited"},
+ * matched against {@code DiagralBindingConstants#DEVICE_ANOMALY_NAME_INHIBITED} by {@code
+ * DiagralHttpClient.hasInhibitedAnomaly()}); {@link #id} is an opaque numeric identifier for the
+ * specific anomaly occurrence and isn't otherwise used by this binding.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

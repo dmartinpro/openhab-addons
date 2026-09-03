@@ -19,6 +19,12 @@ import com.google.gson.annotations.SerializedName;
 /**
  * The {@link DiagralLoginRequest} represents a login request to the Diagral API.
  *
+ * <p>
+ * Sent as the JSON body of the {@code POST /users/authenticate/login} call in {@code
+ * DiagralHttpClient.login()}, the first step of the authentication flow, to obtain a bearer access
+ * token.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -30,6 +36,12 @@ public class DiagralLoginRequest {
     @SerializedName("password")
     public String password;
 
+    /**
+     * Constructs a new login request for the given Diagral account credentials.
+     *
+     * @param username the Diagral account's email address
+     * @param password the Diagral account's password
+     */
     public DiagralLoginRequest(String username, String password) {
         this.username = username;
         this.password = password;

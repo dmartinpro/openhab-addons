@@ -17,6 +17,13 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 /**
  * The {@link DiagralBridgeConfiguration} class contains configuration fields for the Diagral bridge.
  *
+ * <p>
+ * Populated by the openHAB framework from the {@code bridge} thing's configuration parameters (see
+ * {@code thing-type:diagral:bridge} in {@code config.xml}) via {@code
+ * DiagralBridgeHandler.initialize()}'s call to {@code getConfigAs(DiagralBridgeConfiguration.class)}.
+ * Field names must match the config parameter names exactly for that binding to work.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault

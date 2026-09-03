@@ -20,6 +20,12 @@ import com.google.gson.annotations.SerializedName;
 /**
  * The {@link DiagralApiKeyResponse} represents the response from a Diagral API key generation request.
  *
+ * <p>
+ * Returned by {@code POST /users/api_key} and parsed in {@code DiagralHttpClient.generateApiKey()},
+ * which stores {@link #apiKey}/{@link #secretKey} in {@code DiagralAuthenticationManager} for use as the
+ * {@code X-APIKEY} header and HMAC signing secret on all later requests.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault

@@ -16,7 +16,15 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 
 /**
- * The {@link DiagralApiException} is thrown when a Diagral API call fails.
+ * The {@link DiagralApiException} is thrown when a Diagral API call fails for a reason other than
+ * authentication (see {@link DiagralAuthenticationException} for that case).
+ *
+ * <p>
+ * Carries the HTTP status code returned by the API (or {@code 0} for failures that never got a real HTTP
+ * response, e.g. an invalid request built locally before it was sent) so callers can branch on it - for
+ * example {@code DiagralHttpClient.actionProduct()} checks for {@code HttpStatus.INTERNAL_SERVER_ERROR_500}
+ * specifically to work around a known Diagral cloud quirk (see the README's "Known Limitations & Bugs").
+ * </p>
  *
  * @author David Martin - Initial contribution
  */
@@ -27,16 +35,34 @@ public class DiagralApiException extends DiagralException {
 
     private final int statusCode;
 
+    /**
+     * Constructs a new exception with the given message and status code, and no cause.
+     *
+     * @param message a human-readable description of the API failure
+     * @param statusCode the HTTP status code returned by the API, or {@code 0} if none is available
+     */
     public DiagralApiException(String message, int statusCode) {
         super(message);
         this.statusCode = statusCode;
     }
 
+    /**
+     * Constructs a new exception with the given message and status code, wrapping an underlying cause.
+     *
+     * @param message a human-readable description of the API failure
+     * @param statusCode the HTTP status code returned by the API, or {@code 0} if none is available
+     * @param cause the underlying exception that triggered this failure, or null if there is none
+     */
     public DiagralApiException(String message, int statusCode, @Nullable Throwable cause) {
         super(message, cause);
         this.statusCode = statusCode;
     }
 
+    /**
+     * Gets the HTTP status code returned by the API for the failed request.
+     *
+     * @return the HTTP status code, or {@code 0} if the failure never produced a real HTTP response
+     */
     public int getStatusCode() {
         return statusCode;
     }

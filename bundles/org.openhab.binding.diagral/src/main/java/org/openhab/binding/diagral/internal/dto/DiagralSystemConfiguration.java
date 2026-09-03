@@ -20,7 +20,20 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralSystemConfiguration} represents the complete configuration of a Diagral alarm system.
+ * The {@link DiagralSystemConfiguration} represents the complete configuration of a Diagral alarm
+ * system, as returned by the {@code GET /systems/{serialId}/configurations} endpoint (see {@code
+ * DiagralHttpClient.getSystemConfiguration()}).
+ *
+ * <p>
+ * This is the single largest and most-used response in the binding: it lists every device category
+ * ({@link #sensors}, {@link #sirens}, {@link #commands} (keypads), {@link #transmitters}, {@link
+ * #cameras}) that {@code DiagralDiscoveryService} discovers things from, {@link #groups} used for group
+ * discovery, and {@link #presenceGroup}/{@link #partialGroup1}/{@link #partialGroup2} - the group-index
+ * membership lists that tell {@code DiagralDiscoveryService.getArmModesForGroup()} which arm modes each
+ * group belongs to. Fetched once and cached by {@code DiagralBridgeHandler.getSystemConfiguration()};
+ * that cache is explicitly invalidated after a successful enable/disable action so device state stays
+ * fresh (see {@code DiagralBridgeHandler.enableDevice()}/{@code disableDevice()}).
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

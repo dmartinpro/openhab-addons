@@ -43,16 +43,28 @@ public class DiagralCameraHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * @return always {@code null} - the Diagral API has no enable/disable action for cameras
+     */
     @Override
     protected @Nullable String getProductType() {
         return null;
     }
 
+    /**
+     * @param config the system configuration
+     * @return the {@code cameras} list from the configuration
+     */
     @Override
     protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
         return config.cameras;
     }
 
+    /**
+     * No-op - cameras have no channels beyond the base {@code enabled}/{@code low-battery} ones.
+     *
+     * @param device the device data from the API (unused)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Cameras have no channels beyond the base enabled/low-battery ones

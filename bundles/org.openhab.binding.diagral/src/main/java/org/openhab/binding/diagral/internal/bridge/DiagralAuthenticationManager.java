@@ -22,6 +22,15 @@ import org.slf4j.LoggerFactory;
 /**
  * The {@link DiagralAuthenticationManager} manages authentication credentials and API keys for the Diagral API.
  *
+ * <p>
+ * Holds the account credentials (username/password/serialId/pinCode) for the lifetime of one
+ * {@code DiagralBridgeHandler}, plus whatever {@code apiKey}/{@code secretKey} pair is currently valid
+ * (obtained via {@code DiagralHttpClient.authenticate()} and stored with {@link #setApiKeys}). The
+ * apiKey/secretKey fields are mutable and access to them is synchronized because they're read from the
+ * scheduler thread that issues HTTP requests but written from whichever thread runs the authentication
+ * flow - both happen concurrently once the bridge is polling.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -38,6 +47,14 @@ public class DiagralAuthenticationManager {
     private @Nullable String secretKey;
     private boolean authenticated = false;
 
+    /**
+     * Constructs a new authentication manager for one Diagral account/box.
+     *
+     * @param username the Diagral account's email address
+     * @param password the Diagral account's password
+     * @param serialId the serial ID of the Diagral box to control
+     * @param pinCode the PIN code used to authorize system-control (arm/disarm, enable/disable) requests
+     */
     public DiagralAuthenticationManager(String username, String password, String serialId, String pinCode) {
         this.username = username;
         this.password = password;
@@ -45,30 +62,65 @@ public class DiagralAuthenticationManager {
         this.pinCode = pinCode;
     }
 
+    /**
+     * Gets the Diagral account's username.
+     *
+     * @return the username (email address) supplied at construction
+     */
     public String getUsername() {
         return username;
     }
 
+    /**
+     * Gets the Diagral account's password.
+     *
+     * @return the password supplied at construction
+     */
     public String getPassword() {
         return password;
     }
 
+    /**
+     * Gets the serial ID of the Diagral box this manager authenticates against.
+     *
+     * @return the serial ID supplied at construction
+     */
     public String getSerialId() {
         return serialId;
     }
 
+    /**
+     * Gets the PIN code used to authorize system-control requests.
+     *
+     * @return the PIN code supplied at construction
+     */
     public String getPinCode() {
         return pinCode;
     }
 
+    /**
+     * Gets the currently stored API key, if any.
+     *
+     * @return the API key, or null if not currently authenticated
+     */
     public synchronized @Nullable String getApiKey() {
         return apiKey;
     }
 
+    /**
+     * Gets the currently stored secret key, if any.
+     *
+     * @return the secret key, or null if not currently authenticated
+     */
     public synchronized @Nullable String getSecretKey() {
         return secretKey;
     }
 
+    /**
+     * Checks whether this manager currently holds a valid API key/secret key pair.
+     *
+     * @return {@code true} if authenticated and both keys are present
+     */
     public synchronized boolean isAuthenticated() {
         return authenticated && apiKey != null && secretKey != null;
     }

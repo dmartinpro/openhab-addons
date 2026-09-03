@@ -21,7 +21,17 @@ import com.google.gson.annotations.SerializedName;
 
 /**
  * The {@link DiagralAnomalies} represents the anomalies currently reported across all device
- * categories of a Diagral system.
+ * categories of a Diagral system, as returned by the {@code GET /systems/{serialId}/anomalies} endpoint
+ * (see {@code DiagralHttpClient.getAnomalies()}).
+ *
+ * <p>
+ * A {@code null} category list (e.g. {@link #sensors}) means nothing in that category currently has an
+ * anomaly - it is not the same as "unknown"; see {@code DiagralHttpClient.isDeviceInhibited()}, which
+ * relies on this distinction. The endpoint itself behaves as a periodically-refreshed snapshot rather
+ * than a fully live query, and returns HTTP 404 when there are no anomalies at all - {@code
+ * DiagralHttpClient.getAnomalies()} translates that specific 404 into an empty {@link DiagralAnomalies}
+ * rather than propagating it as an error.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */
@@ -58,6 +68,11 @@ public class DiagralAnomalies {
     /**
      * Computes the total number of device anomalies reported across all categories.
      *
+     * <p>
+     * Used by {@code DiagralSystemHandler.updateChannels()} to drive the alarm system's {@code
+     * anomaly-count} and {@code anomalies-present} channels.
+     * </p>
+     *
      * @return the total anomaly count
      */
     public int getTotalCount() {
@@ -65,6 +80,13 @@ public class DiagralAnomalies {
                 + size(transmitters) + size(central);
     }
 
+    /**
+     * Null-safely gets the size of a category's anomaly list.
+     *
+     * @param list the category's anomaly list, possibly null
+     * @return the list's size, or {@code 0} if the list is null (i.e. nothing in that category has an
+     *         anomaly)
+     */
     private static int size(@Nullable List<DiagralAnomalyDetail> list) {
         return list == null ? 0 : list.size();
     }

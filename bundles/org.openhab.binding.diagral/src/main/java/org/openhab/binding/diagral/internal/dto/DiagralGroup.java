@@ -18,7 +18,18 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralGroup} represents a device group in the Diagral system.
+ * The {@link DiagralGroup} represents a device group in the Diagral system, as returned in the
+ * {@code groups} list of the {@code /systems/{serialId}/configurations} response.
+ *
+ * <p>
+ * A group is a named collection of devices ({@link #index} is the numeric group ID referenced elsewhere,
+ * e.g. by {@code DiagralSystemStatus#activatedGroups} and {@code DiagralSystemConfiguration}'s
+ * {@code presenceGroup}/{@code partialGroup1}/{@code partialGroup2} membership lists) that can be armed
+ * or disarmed together. {@link #inputDelay}/{@link #outputDelay} are the entry/exit delay in seconds
+ * before the alarm actually triggers, surfaced as discovery-time thing properties by {@code
+ * DiagralDiscoveryService.discoverGroups()} rather than as channels, since they're static install
+ * metadata rather than live state.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

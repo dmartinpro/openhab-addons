@@ -44,16 +44,28 @@ public class DiagralKeypadHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * @return {@link org.openhab.binding.diagral.internal.DiagralBindingConstants#PRODUCT_TYPE_COMMAND}
+     */
     @Override
     protected @Nullable String getProductType() {
         return PRODUCT_TYPE_COMMAND;
     }
 
+    /**
+     * @param config the system configuration
+     * @return the {@code commands} list from the configuration (the API's name for keypads)
+     */
     @Override
     protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
         return config.commands;
     }
 
+    /**
+     * No-op - keypads have no channels beyond the base {@code enabled}/{@code low-battery} ones.
+     *
+     * @param device the device data from the API (unused)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Keypads have no channels beyond the base enabled/low-battery ones
