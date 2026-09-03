@@ -132,3 +132,20 @@ Child handlers never talk to the network directly — they always go through `ge
 
 - `DiagralBridgeHandler.registerDiscoveryListener` has a `TODO: complete this function` — it currently just stores the listener without pushing already-known devices to it.
 - `DiagralBridgeHandler.poll()` has a `TODO` noting that consecutive poll failures should eventually flip the bridge offline; currently a single failed poll is logged and ignored.
+
+## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
+
+Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation
+equipment that isn't security/intrusion related: roller shutters, gate/garage-door automatisms, and
+comfort/lighting receivers. This binding does **not** implement it, and shouldn't unless the situation described
+below changes:
+
+- The `pydiagral` library exposes a `get_automatism_rudes()` method, but Diagral's official cloud API currently
+  returns an **empty list** for it (`Rudes(rudes=[])`) regardless of what automatism hardware is actually
+  installed. The cloud API today is deliberately scoped to core security functions only: arm/disarm state
+  (Full/Night/Partial), intrusion alerts and anomaly reporting (battery, radio link), and webhooks. Community
+  home-automation developers have asked Hager/Diagral to open this up, but as of now controlling "comfort"
+  devices still requires the official e-ONE app (or the Diagral Secure ecosystem) — there's no API path for it.
+- This is also why Phase 6 of the implementation plan (read-only exposure of rudes as a bridge property) is on
+  hold: even if implemented, it would surface nothing, since the endpoint has no real data to return today. Revisit
+  only if Diagral's API is observed to start returning non-empty `rudes` data.
