@@ -14,6 +14,7 @@ package org.openhab.binding.diagral.internal.discovery;
 
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,7 +100,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         discoverSensors(bridgeHandler, config.sensors);
 
         // Discover groups
-        discoverGroups(bridgeHandler, config.groups);
+        discoverGroups(bridgeHandler, config);
 
         logger.debug("Diagral device discovery completed");
     }
@@ -226,9 +227,10 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
      * Discovers device groups.
      *
      * @param bridgeHandler the bridge handler
-     * @param groups the list of groups from the configuration
+     * @param config the system configuration
      */
-    private void discoverGroups(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralGroup> groups) {
+    private void discoverGroups(DiagralBridgeHandler bridgeHandler, DiagralSystemConfiguration config) {
+        List<DiagralGroup> groups = config.groups;
         if (groups == null) {
             return;
         }
@@ -243,6 +245,9 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
             properties.put(CONFIG_GROUP_ID, groupId);
             properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
             properties.put(PROPERTY_GROUP_ID, groupId);
+            properties.put(PROPERTY_GROUP_INPUT_DELAY, group.inputDelay);
+            properties.put(PROPERTY_GROUP_OUTPUT_DELAY, group.outputDelay);
+            properties.put(PROPERTY_GROUP_MODES, getArmModesForGroup(group.index, config));
 
             String label = group.name != null ? group.name + " (Group)" : "Diagral Group " + group.index;
 
@@ -251,6 +256,38 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
 
             logger.debug("Discovered group: {} - {}", thingUID, label);
         }
+    }
+
+    /**
+     * Builds a human-readable list of the arm modes a group belongs to, based on the presence/partial
+     * group membership lists from the system configuration.
+     *
+     * <p>
+     * The main FULL arm mode has no separate membership list in the API - it implicitly includes every
+     * group - so it's intentionally not added here.
+     * </p>
+     *
+     * @param groupIndex the group's index
+     * @param config the system configuration
+     * @return a comma-separated list of arm mode names, or an empty string if the group is only part of
+     *         FULL arm
+     */
+    private static String getArmModesForGroup(int groupIndex, DiagralSystemConfiguration config) {
+        List<String> modes = new ArrayList<>();
+        if (containsGroup(config.presenceGroup, groupIndex)) {
+            modes.add(MODE_PRESENCE);
+        }
+        if (containsGroup(config.partialGroup1, groupIndex)) {
+            modes.add(MODE_PARTIAL1);
+        }
+        if (containsGroup(config.partialGroup2, groupIndex)) {
+            modes.add(MODE_PARTIAL2);
+        }
+        return String.join(", ", modes);
+    }
+
+    private static boolean containsGroup(@Nullable List<Integer> groupIndices, int groupIndex) {
+        return groupIndices != null && groupIndices.contains(groupIndex);
     }
 
     /**

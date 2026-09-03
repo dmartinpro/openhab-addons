@@ -109,6 +109,9 @@ public class DiagralBindingConstants {
     public static final String PROPERTY_DEVICE_SUBTYPE = "deviceSubtype";
     public static final String PROPERTY_DEVICE_ID = "deviceId";
     public static final String PROPERTY_GROUP_ID = "groupId";
+    public static final String PROPERTY_GROUP_INPUT_DELAY = "inputDelay";
+    public static final String PROPERTY_GROUP_OUTPUT_DELAY = "outputDelay";
+    public static final String PROPERTY_GROUP_MODES = "armModes";
     public static final String PROPERTY_VENDOR = "vendor";
 
     // Vendor constant
