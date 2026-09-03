@@ -63,4 +63,28 @@ public class DiagralDevice {
 
     @SerializedName("anomalies")
     public @Nullable Map<String, Boolean> anomalies;
+
+    @SerializedName("isPlug")
+    public @Nullable Boolean isPlug;
+
+    @SerializedName("isVideo")
+    public @Nullable Boolean isVideo;
+
+    @SerializedName("installationDate")
+    public @Nullable String installationDate;
+
+    /**
+     * Gets a unique identifier for this device.
+     *
+     * <p>
+     * Sensors have a {@code uid}, but sirens, keypads (the API's "commands" category), and transmitters
+     * don't - the API only identifies them by their {@code serial} number. Use this instead of {@link #id}
+     * directly wherever a device needs to be identified, so it works across every device category.
+     * </p>
+     *
+     * @return {@link #id} if present, otherwise {@link #serial}, or null if neither is available
+     */
+    public @Nullable String getUniqueId() {
+        return id != null ? id : serial;
+    }
 }

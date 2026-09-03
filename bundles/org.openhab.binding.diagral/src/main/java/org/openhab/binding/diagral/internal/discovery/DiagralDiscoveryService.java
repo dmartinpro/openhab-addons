@@ -46,6 +46,10 @@ import org.slf4j.LoggerFactory;
  * <li>Alarm system control</li>
  * <li>Motion sensors</li>
  * <li>Contact sensors</li>
+ * <li>Sirens</li>
+ * <li>Keypads</li>
+ * <li>Plugs and generic transmitters</li>
+ * <li>Cameras</li>
  * <li>Device groups</li>
  * </ul>
  * </p>
@@ -72,7 +76,9 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
      */
     public DiagralDiscoveryService() {
         super(DiagralBridgeHandler.class,
-                Set.of(THING_TYPE_ALARM_SYSTEM, THING_TYPE_MOTION_SENSOR, THING_TYPE_CONTACT_SENSOR, THING_TYPE_GROUP),
+                Set.of(THING_TYPE_ALARM_SYSTEM, THING_TYPE_MOTION_SENSOR, THING_TYPE_CONTACT_SENSOR, THING_TYPE_GROUP,
+                        THING_TYPE_SIREN, THING_TYPE_KEYPAD, THING_TYPE_PLUG, THING_TYPE_TRANSMITTER,
+                        THING_TYPE_CAMERA),
                 DISCOVERY_TIMEOUT_SECONDS, true);
     }
 
@@ -98,6 +104,10 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
 
         // Discover devices
         discoverSensors(bridgeHandler, config.sensors);
+        discoverSirens(bridgeHandler, config.sirens);
+        discoverCommands(bridgeHandler, config.commands);
+        discoverTransmitters(bridgeHandler, config.transmitters);
+        discoverCameras(bridgeHandler, config.cameras);
 
         // Discover groups
         discoverGroups(bridgeHandler, config);
@@ -161,7 +171,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
     }
 
     /**
-     * Discovers sensor devices.
+     * Discovers sensor devices (motion/contact - the actual thing type is resolved per-device).
      *
      * @param bridgeHandler the bridge handler
      * @param sensors the list of sensors from the configuration
@@ -174,53 +184,143 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         ThingUID bridgeUID = bridgeHandler.getThing().getUID();
 
         for (DiagralDevice device : sensors) {
-            if (device.id == null || device.type == null) {
+            if (device.getUniqueId() == null || device.type == null) {
                 continue;
             }
 
-            // Determine thing type based on device subtype
             ThingTypeUID thingTypeUID = getThingTypeForDevice(device);
             if (thingTypeUID == null) {
-                logger.debug("Skipping device with unknown type: {} ({})", device.id, device.type);
+                logger.debug("Skipping device with unknown type: {} ({})", device.getUniqueId(), device.type);
                 continue;
             }
 
-            // Create thing UID
-            String id = device.id; // Already checked for null above
-            String deviceId = id.replaceAll("[^a-zA-Z0-9_]", "_");
-            ThingUID thingUID = new ThingUID(thingTypeUID, bridgeUID, deviceId);
-
-            // Build properties
-            Map<String, Object> properties = new HashMap<>();
-            properties.put(CONFIG_DEVICE_ID, id);
-            properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
-
-            Integer deviceIndex = device.deviceIndex;
-            if (deviceIndex != null) {
-                properties.put(CONFIG_DEVICE_INDEX, deviceIndex);
-            }
-
-            String type = device.type;
-            if (type != null) {
-                properties.put(PROPERTY_DEVICE_TYPE, type);
-            }
-            String subtype = device.subtype;
-            if (subtype != null) {
-                properties.put(PROPERTY_DEVICE_SUBTYPE, subtype);
-            }
-            String serial = device.serial;
-            if (serial != null) {
-                properties.put("serial", serial);
-            }
-
-            // Build label
-            String label = device.name != null ? device.name + " (Sensor)" : "Diagral " + device.type;
-
-            thingDiscovered(DiscoveryResultBuilder.create(thingUID).withBridge(bridgeUID).withLabel(label)
-                    .withProperties(properties).withRepresentationProperty(CONFIG_DEVICE_ID).build());
-
-            logger.debug("Discovered sensor: {} - {}", thingUID, label);
+            discoverDevice(bridgeUID, thingTypeUID, device, "Sensor");
         }
+    }
+
+    /**
+     * Discovers sirens.
+     *
+     * @param bridgeHandler the bridge handler
+     * @param sirens the list of sirens from the configuration
+     */
+    private void discoverSirens(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> sirens) {
+        if (sirens == null) {
+            return;
+        }
+
+        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
+        for (DiagralDevice device : sirens) {
+            discoverDevice(bridgeUID, THING_TYPE_SIREN, device, "Siren");
+        }
+    }
+
+    /**
+     * Discovers keypads (the API's "commands" device category).
+     *
+     * @param bridgeHandler the bridge handler
+     * @param commands the list of keypads from the configuration
+     */
+    private void discoverCommands(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> commands) {
+        if (commands == null) {
+            return;
+        }
+
+        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
+        for (DiagralDevice device : commands) {
+            discoverDevice(bridgeUID, THING_TYPE_KEYPAD, device, "Keypad");
+        }
+    }
+
+    /**
+     * Discovers cameras.
+     *
+     * @param bridgeHandler the bridge handler
+     * @param cameras the list of cameras from the configuration
+     */
+    private void discoverCameras(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> cameras) {
+        if (cameras == null) {
+            return;
+        }
+
+        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
+        for (DiagralDevice device : cameras) {
+            discoverDevice(bridgeUID, THING_TYPE_CAMERA, device, "Camera");
+        }
+    }
+
+    /**
+     * Discovers transmitters, branching per-device on {@code isPlug} to distinguish smart plugs (which
+     * support enable/disable) from generic transmitters (which don't - see
+     * {@link org.openhab.binding.diagral.internal.handler.DiagralTransmitterHandler}).
+     *
+     * @param bridgeHandler the bridge handler
+     * @param transmitters the list of transmitters from the configuration
+     */
+    private void discoverTransmitters(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> transmitters) {
+        if (transmitters == null) {
+            return;
+        }
+
+        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
+        for (DiagralDevice device : transmitters) {
+            if (Boolean.TRUE.equals(device.isPlug)) {
+                discoverDevice(bridgeUID, THING_TYPE_PLUG, device, "Plug");
+            } else {
+                discoverDevice(bridgeUID, THING_TYPE_TRANSMITTER, device, "Transmitter");
+            }
+        }
+    }
+
+    /**
+     * Builds and reports a discovery result for a single device.
+     *
+     * @param bridgeUID the bridge's thing UID
+     * @param thingTypeUID the thing type to create
+     * @param device the device
+     * @param labelSuffix a short label suffix, e.g. "Siren"
+     */
+    private void discoverDevice(ThingUID bridgeUID, ThingTypeUID thingTypeUID, DiagralDevice device,
+            String labelSuffix) {
+        // Sirens, keypads, and transmitters have no "uid" in the API - only sensors do - so fall back to
+        // the serial number to identify them (see DiagralDevice#getUniqueId).
+        String id = device.getUniqueId();
+        if (id == null) {
+            return;
+        }
+
+        String deviceId = id.replaceAll("[^a-zA-Z0-9_]", "_");
+        ThingUID thingUID = new ThingUID(thingTypeUID, bridgeUID, deviceId);
+
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(CONFIG_DEVICE_ID, id);
+        properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
+
+        Integer deviceIndex = device.deviceIndex;
+        if (deviceIndex != null) {
+            properties.put(CONFIG_DEVICE_INDEX, deviceIndex);
+        }
+
+        String type = device.type;
+        if (type != null) {
+            properties.put(PROPERTY_DEVICE_TYPE, type);
+        }
+        String subtype = device.subtype;
+        if (subtype != null) {
+            properties.put(PROPERTY_DEVICE_SUBTYPE, subtype);
+        }
+        String serial = device.serial;
+        if (serial != null) {
+            properties.put("serial", serial);
+        }
+
+        String label = device.name != null && !device.name.isEmpty() ? device.name + " (" + labelSuffix + ")"
+                : "Diagral " + labelSuffix;
+
+        thingDiscovered(DiscoveryResultBuilder.create(thingUID).withBridge(bridgeUID).withLabel(label)
+                .withProperties(properties).withRepresentationProperty(CONFIG_DEVICE_ID).build());
+
+        logger.debug("Discovered {}: {} - {}", labelSuffix, thingUID, label);
     }
 
     /**
