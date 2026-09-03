@@ -31,9 +31,9 @@ public class DiagralGroup {
     @SerializedName("index")
     public int index;
 
-    @SerializedName("input_delay")
+    @SerializedName("inputDelay")
     public int inputDelay;
 
-    @SerializedName("output_delay")
+    @SerializedName("outputDelay")
     public int outputDelay;
 }

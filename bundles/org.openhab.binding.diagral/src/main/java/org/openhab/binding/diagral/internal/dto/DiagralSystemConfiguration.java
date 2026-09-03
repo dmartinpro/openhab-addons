@@ -33,6 +33,12 @@ public class DiagralSystemConfiguration {
     @SerializedName("presenceGroup")
     public @Nullable List<Integer> presenceGroup;
 
+    @SerializedName("partialGroup1")
+    public @Nullable List<Integer> partialGroup1;
+
+    @SerializedName("partialGroup2")
+    public @Nullable List<Integer> partialGroup2;
+
     @SerializedName("alarm")
     public @Nullable DiagralAlarm alarm;
 
