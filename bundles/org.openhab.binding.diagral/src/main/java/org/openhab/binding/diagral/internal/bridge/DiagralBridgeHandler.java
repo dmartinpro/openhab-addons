@@ -96,6 +96,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private @Nullable DiagralAuthenticationManager authManager;
     private @Nullable DiagralHttpClient diagralHttpClient;
     private @Nullable ScheduledFuture<?> pollingJob;
+    private @Nullable ScheduledFuture<?> authRetryJob;
     private @Nullable DiagralSystemConfiguration cachedConfiguration;
     private @Nullable DiagralSystemDetails cachedDetails;
     private @Nullable DiagralSystemStatus cachedSystemStatus;
@@ -167,20 +168,39 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         diagralHttpClient = new DiagralHttpClient(httpClient, manager);
 
         // Start authentication and polling in background
-        scheduler.execute(() -> {
-            try {
-                authenticate();
-                startPolling(config.refreshInterval);
-            } catch (DiagralException e) {
-                logger.error("Initialization failed", e);
-                updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, e.getMessage());
-            }
-        });
+        scheduler.execute(() -> attemptInitialAuthentication(config));
     }
 
     /**
-     * Stops polling, best-effort deletes the current API key from the Diagral account, and releases all
-     * held state.
+     * Attempts the first authentication and, on success, starts polling; on failure, schedules a retry of
+     * this same method after {@code config.refreshInterval} seconds rather than giving up.
+     *
+     * <p>
+     * Live-verified (2026-09-03) that a transient network failure during startup - the same kind of
+     * flakiness {@link #poll()} already tolerates via its re-authentication path - previously left the
+     * bridge permanently {@code OFFLINE} until manually reinitialized, since {@link #startPolling(int)}
+     * (and with it, {@code poll()}'s own resilience) was never reached. This method closes that gap by
+     * retrying itself on the same cadence as regular polling, instead of requiring manual intervention for
+     * what's usually just a temporary connectivity blip.
+     * </p>
+     *
+     * @param config the validated bridge configuration (carries the retry/poll interval)
+     */
+    private void attemptInitialAuthentication(DiagralBridgeConfiguration config) {
+        try {
+            authenticate();
+            startPolling(config.refreshInterval);
+        } catch (DiagralException e) {
+            logger.warn("Initial authentication failed, will retry in {}s: {}", config.refreshInterval, e.getMessage());
+            authRetryJob = scheduler.schedule(() -> attemptInitialAuthentication(config), config.refreshInterval,
+                    TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * Stops polling, cancels any pending initial-authentication retry (see {@link
+     * #attemptInitialAuthentication(DiagralBridgeConfiguration)}), best-effort deletes the current API key
+     * from the Diagral account, and releases all held state.
      *
      * <p>
      * The API-key deletion is fire-and-forget on {@code scheduler} (see the inline comment below) so
@@ -192,6 +212,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         logger.debug("Disposing Diagral bridge handler");
 
         stopPolling();
+
+        ScheduledFuture<?> retryJob = authRetryJob;
+        if (retryJob != null && !retryJob.isCancelled()) {
+            retryJob.cancel(true);
+            authRetryJob = null;
+        }
 
         DiagralHttpClient client = diagralHttpClient;
         DiagralAuthenticationManager manager = authManager;
