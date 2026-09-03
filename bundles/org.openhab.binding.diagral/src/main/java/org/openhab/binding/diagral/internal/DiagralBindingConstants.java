@@ -12,6 +12,8 @@
  */
 package org.openhab.binding.diagral.internal;
 
+import java.util.Set;
+
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.core.thing.ThingTypeUID;
 
@@ -100,6 +102,28 @@ public class DiagralBindingConstants {
     public static final String MODE_PRESENCE = "PRESENCE";
     public static final String MODE_PARTIAL1 = "PARTIAL1";
     public static final String MODE_PARTIAL2 = "PARTIAL2";
+
+    /**
+     * The whole-system {@code status} value the real API reports whenever one or more groups are armed
+     * directly via the {@code activate_group} endpoint, as opposed to a whole-system mode command
+     * ({@link #MODE_OFF}/{@link #MODE_FULL}/{@link #MODE_PRESENCE}/{@link #MODE_PARTIAL1}/{@link
+     * #MODE_PARTIAL2}). Confirmed live (2026-09-03): {@code activated_groups} stays empty in this state -
+     * the API gives no way to tell *which* group(s) are active from {@code /status} alone here, unlike the
+     * five named modes above. See {@link #NAMED_SYSTEM_MODES} and
+     * {@code org.openhab.binding.diagral.internal.handler.DiagralGroupHandler} for how this binding works
+     * around that gap.
+     */
+    public static final String MODE_TEMPO_GROUP = "TEMPO_GROUP";
+
+    /**
+     * The five whole-system modes for which the real API's {@code /status} response's {@code
+     * activated_groups} list is authoritative. Used by {@code DiagralGroupHandler} to detect when {@code
+     * activated_groups} can be trusted directly, versus when the system is in {@link #MODE_TEMPO_GROUP} (or
+     * any other/unrecognized status) and a group's active state must instead be derived from the bridge's
+     * own best-effort tracking of directly-issued group actions.
+     */
+    public static final Set<String> NAMED_SYSTEM_MODES = Set.of(MODE_OFF, MODE_FULL, MODE_PRESENCE, MODE_PARTIAL1,
+            MODE_PARTIAL2);
 
     // Diagral Product Types (used for the per-device enable/disable API)
     public static final String PRODUCT_TYPE_CENTRAL = "CENTRAL";
