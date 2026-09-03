@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Locale;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -112,7 +113,7 @@ public class DiagralCryptoUtil {
             sha256HMAC.init(secretKeySpec);
 
             byte[] hash = sha256HMAC.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            return HexUtils.bytesToHex(hash).toUpperCase();
+            return HexUtils.bytesToHex(hash).toUpperCase(Locale.ROOT);
         } catch (NoSuchAlgorithmException e) {
             String message = "HMAC-SHA256 algorithm not found. This should never happen. Check your Java setup.";
             LOGGER.error(message, e);

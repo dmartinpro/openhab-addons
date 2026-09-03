@@ -16,6 +16,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -588,7 +589,7 @@ public class DiagralHttpClient {
         }
 
         long timestamp = System.currentTimeMillis() / 1000;
-        String hmac = authManager.generateSignature(timestamp).toLowerCase();
+        String hmac = authManager.generateSignature(timestamp).toLowerCase(Locale.ROOT);
         String apiKey = authManager.getApiKey();
 
         if (apiKey == null) {
