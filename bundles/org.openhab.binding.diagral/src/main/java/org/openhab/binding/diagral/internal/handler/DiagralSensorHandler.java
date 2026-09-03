@@ -14,6 +14,8 @@ package org.openhab.binding.diagral.internal.handler;
 
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
+import java.util.List;
+
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.DiagralConfiguration;
@@ -124,6 +126,13 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
      * @param enabled true to enable, false to disable
      */
     private void setDeviceEnabled(boolean enabled) {
+        String productType = getProductType();
+        if (productType == null) {
+            // The framework won't normally deliver a command for a read-only channel, but guard anyway.
+            logger.warn("Enable/disable is not supported by the Diagral API for this device type");
+            return;
+        }
+
         DiagralBridgeHandler bridgeHandler = getBridgeHandler();
         if (bridgeHandler == null) {
             logger.warn("Cannot set device enabled state - bridge handler not available");
@@ -138,9 +147,9 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
         logger.debug("Setting device {} to {}", deviceId, enabled ? "enabled" : "disabled");
 
         if (enabled) {
-            bridgeHandler.enableDevice(getProductType(), deviceIndex);
+            bridgeHandler.enableDevice(productType, deviceIndex);
         } else {
-            bridgeHandler.disableDevice(getProductType(), deviceIndex);
+            bridgeHandler.disableDevice(productType, deviceIndex);
         }
     }
 
@@ -149,12 +158,14 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
      *
      * <p>
      * Subclasses should override this if they represent a different product category (e.g. sirens,
-     * keypads, plugs).
+     * keypads, plugs), or return {@code null} if the Diagral API doesn't support enable/disable for this
+     * category at all (e.g. transmitters, cameras) - such subclasses should also declare their
+     * {@code enabled} channel as read-only in {@code thing-types.xml}.
      * </p>
      *
-     * @return the product type
+     * @return the product type, or null if not supported
      */
-    protected String getProductType() {
+    protected @Nullable String getProductType() {
         return PRODUCT_TYPE_SENSOR;
     }
 
@@ -199,21 +210,32 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
      * @return the device, or null if not found
      */
     private @Nullable DiagralDevice findDevice(DiagralSystemConfiguration config, String deviceId) {
-        if (config == null) {
+        List<DiagralDevice> devices = getDeviceList(config);
+        if (devices == null) {
             return null;
         }
 
-        // Search in sensors
-        if (config.sensors != null) {
-            for (DiagralDevice device : config.sensors) {
-                if (deviceId.equals(device.id)) {
-                    return device;
-                }
+        for (DiagralDevice device : devices) {
+            if (deviceId.equals(device.getUniqueId())) {
+                return device;
             }
         }
-
-        // Could also search in other device lists if needed
         return null;
+    }
+
+    /**
+     * Gets the device list this handler's devices are found in.
+     *
+     * <p>
+     * Subclasses should override this if they represent a different device category (e.g. sirens,
+     * keypads, transmitters, cameras).
+     * </p>
+     *
+     * @param config the system configuration
+     * @return the matching device list, or null if not available
+     */
+    protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
+        return config.sensors;
     }
 
     /**

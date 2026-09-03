@@ -48,6 +48,9 @@ public class DiagralSystemConfiguration {
     @SerializedName("sirens")
     public @Nullable List<DiagralDevice> sirens;
 
+    @SerializedName("cameras")
+    public @Nullable List<DiagralDevice> cameras;
+
     @SerializedName("transmitters")
     public @Nullable List<DiagralDevice> transmitters;
 
