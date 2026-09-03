@@ -8,6 +8,14 @@ This is `org.openhab.binding.diagral`, an openHAB binding bundle that lives insi
 
 The repo-wide `AGENTS.md` at the monorepo root (`../../AGENTS.md`) has general openHAB add-on conventions (Java 21, import ordering, `mvn spotless:apply`, binding-skeleton creation script, etc.) — read it for anything not covered here. This file only covers what's specific to the Diagral binding.
 
+## Documentation requirement (project-specific, stricter than the default openHAB guideline)
+
+The user wants this bundle's source code thoroughly documented for maintainability, beyond openHAB's own guideline (which only requires Javadoc on public/protected/default-visibility members and exempts DTOs — see "Null-safety and visibility" below). For this bundle specifically:
+
+- **Every class and interface** gets a class-level Javadoc block explaining both its functional role (why it exists, what part of the binding it belongs to) and relevant technical detail.
+- **Every method — public, protected, package-private, *and* private** — gets a Javadoc block: a one-line functional summary, `@param`/`@return`/`@throws` as applicable, and a short "why/how" note for anything non-obvious. This applies to DTOs too, despite the general openHAB exemption.
+- **Standing rule for all future work**: whenever a class or method in this bundle is created or edited, its Javadoc must be added or updated in the same change. Don't leave it for a later cleanup pass.
+
 ## Build & Test Commands
 
 Run from **this bundle's directory** unless noted otherwise:
@@ -84,7 +92,7 @@ Child handlers never talk to the network directly — they always go through `ge
 - Mark nullable fields/returns explicitly with `@Nullable`.
 - An OSGi `@Reference`-injected field that can't be null-checked at construction uses `@NonNullByDefault({})` (see `DiagralHandlerFactory`'s constructor pattern if adding new `@Reference` fields).
 - Put implementation classes under `internal` (already the case here) unless they're meant to be used by other bindings/scripts.
-- JavaDoc is required on classes, interfaces, enums, constants, and default/protected/public fields and methods — DTOs are exempt. Add an `@author` tag; append new contributors below existing ones rather than replacing them.
+- openHAB's own guideline requires JavaDoc on classes, interfaces, enums, constants, and default/protected/public fields and methods, exempting DTOs — but this bundle applies a **stricter, project-specific rule** (see "Documentation requirement" above): JavaDoc on every class/method including private ones and DTOs. Add an `@author` tag on classes; append new contributors below existing ones rather than replacing them.
 
 ### Logging
 
