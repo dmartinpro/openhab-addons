@@ -69,6 +69,10 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
         super(thing);
     }
 
+    /**
+     * Reads and validates the group configuration, checks bridge availability, and performs an initial
+     * status refresh.
+     */
     @Override
     public void initialize() {
         logger.debug("Initializing Diagral group handler");
@@ -102,6 +106,13 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
         refreshStatus();
     }
 
+    /**
+     * Handles commands sent to this group's channels: {@link RefreshType} triggers a status refresh, and
+     * an {@code OnOffType} on {@code active} activates/deactivates the group via the bridge.
+     *
+     * @param channelUID the channel the command targets
+     * @param command the command received
+     */
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         if (command instanceof RefreshType) {
@@ -212,6 +223,12 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
         return null;
     }
 
+    /**
+     * Mirrors this thing's status to the bridge's status: goes {@code ONLINE} (and refreshes) when the
+     * bridge comes online, goes {@code OFFLINE} otherwise.
+     *
+     * @param bridgeStatusInfo the bridge's new status
+     */
     @Override
     public void bridgeStatusChanged(org.openhab.core.thing.ThingStatusInfo bridgeStatusInfo) {
         if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE) {

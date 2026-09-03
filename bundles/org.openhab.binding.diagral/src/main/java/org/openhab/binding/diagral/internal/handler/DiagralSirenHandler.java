@@ -44,16 +44,28 @@ public class DiagralSirenHandler extends DiagralSensorHandler {
         super(thing);
     }
 
+    /**
+     * @return {@link org.openhab.binding.diagral.internal.DiagralBindingConstants#PRODUCT_TYPE_ALARM}
+     */
     @Override
     protected @Nullable String getProductType() {
         return PRODUCT_TYPE_ALARM;
     }
 
+    /**
+     * @param config the system configuration
+     * @return the {@code sirens} list from the configuration
+     */
     @Override
     protected @Nullable List<DiagralDevice> getDeviceList(DiagralSystemConfiguration config) {
         return config.sirens;
     }
 
+    /**
+     * No-op - sirens have no channels beyond the base {@code enabled}/{@code low-battery} ones.
+     *
+     * @param device the device data from the API (unused)
+     */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
         // Sirens have no channels beyond the base enabled/low-battery ones

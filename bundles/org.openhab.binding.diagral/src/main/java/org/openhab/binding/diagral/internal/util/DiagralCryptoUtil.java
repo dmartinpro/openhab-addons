@@ -29,6 +29,13 @@ import org.slf4j.LoggerFactory;
 /**
  * The {@link DiagralCryptoUtil} provides cryptographic utilities for the Diagral binding.
  *
+ * <p>
+ * Currently a single responsibility: computing the HMAC-SHA256 request signature the Diagral cloud API
+ * requires on every authenticated call (see {@code DiagralAuthenticationManager.generateSignature()},
+ * the only caller in this bundle, and {@code DiagralHttpClient.executeRequest()} which attaches the
+ * result as the {@code X-HMAC} header). A static-only utility class - not instantiable.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -37,19 +44,29 @@ public class DiagralCryptoUtil {
     private static final Logger LOGGER = LoggerFactory.getLogger(DiagralCryptoUtil.class);
     private static final String HMAC_SHA256_ALGORITHM = "HmacSHA256";
 
+    /**
+     * Private constructor - this is a static-only utility class and must not be instantiated.
+     */
     private DiagralCryptoUtil() {
         // prevent instantiation
     }
 
     /**
-     * Generate hmac for Diagral API requests based on this tuple: "timestamp.serialId.apiKey"
-     * 
-     * @param timestamp
-     * @param serialId
-     * @param apiKey
-     * @param secret
-     * @return
-     * @throws DiagralException
+     * Generates the HMAC-SHA256 signature for a Diagral API request from its three components.
+     *
+     * <p>
+     * Convenience overload that builds the {@code "timestamp.serialId.apiKey"} data string before
+     * delegating to {@link #hmacSha256(String, String)}. Not currently called anywhere in this bundle -
+     * {@code DiagralAuthenticationManager.generateSignature()} builds the data string itself and calls
+     * the two-argument overload directly - but kept as a convenience for future callers.
+     * </p>
+     *
+     * @param timestamp the Unix timestamp (in seconds) to include in the signed data
+     * @param serialId the Diagral box serial ID to include in the signed data
+     * @param apiKey the API key to include in the signed data
+     * @param secret the secret key to sign with
+     * @return the resulting HMAC-SHA256 as an uppercase hexadecimal string
+     * @throws DiagralException if the HMAC calculation fails (see {@link #hmacSha256(String, String)})
      */
     public static String hmacSha256(String timestamp, String serialId, String apiKey, String secret)
             throws DiagralException {
@@ -58,14 +75,21 @@ public class DiagralCryptoUtil {
     }
 
     /**
-     * Generate hmac for Diagral API requests based on this tuple: "timestamp.serialId.apiKey"
-     * Timestamp will be generated based on the current time (Instant.now())
-     * 
-     * @param serialId
-     * @param apiKey
-     * @param secret
-     * @return
-     * @throws DiagralException
+     * Generates the HMAC-SHA256 signature for a Diagral API request, using the current time as the
+     * timestamp component.
+     *
+     * <p>
+     * Convenience overload equivalent to calling {@link #hmacSha256(String, String, String, String)}
+     * with {@code Instant.now().getEpochSecond()} as the timestamp. Not currently called anywhere in
+     * this bundle (see {@link #hmacSha256(String, String, String, String)}), but kept as a convenience
+     * for future callers.
+     * </p>
+     *
+     * @param serialId the Diagral box serial ID to include in the signed data
+     * @param apiKey the API key to include in the signed data
+     * @param secret the secret key to sign with
+     * @return the resulting HMAC-SHA256 as an uppercase hexadecimal string
+     * @throws DiagralException if the HMAC calculation fails (see {@link #hmacSha256(String, String)})
      */
     public static String hmacSha256(String serialId, String apiKey, String secret) throws DiagralException {
         long timestamp = Instant.now().getEpochSecond();

@@ -18,7 +18,16 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralSystemDetails} represents the details of a Diagral alarm system.
+ * The {@link DiagralSystemDetails} represents the details of a Diagral alarm system, as returned by the
+ * {@code GET /systems/{serialId}} endpoint (see {@code DiagralHttpClient.getSystemDetails()}).
+ *
+ * <p>
+ * Note the PascalCase {@code @SerializedName} values - unlike most other Diagral API responses used by
+ * this bundle, this endpoint's JSON keys are capitalized. Fetched once and cached by {@code
+ * DiagralBridgeHandler.getSystemDetails()}, and used only to populate discovery-time properties on the
+ * {@code alarm-system} thing in {@code DiagralDiscoveryService.discoverAlarmSystem()} - none of these
+ * fields back a live channel.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */

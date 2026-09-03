@@ -20,6 +20,12 @@ import com.google.gson.annotations.SerializedName;
 /**
  * The {@link DiagralLoginResponse} represents the response from a Diagral API login request.
  *
+ * <p>
+ * Returned by {@code POST /users/authenticate/login} and parsed in {@code DiagralHttpClient.login()},
+ * which uses {@link #accessToken} as the {@code Authorization: Bearer} credential for the subsequent
+ * API-key-generation call - it is not used for any other request.
+ * </p>
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault

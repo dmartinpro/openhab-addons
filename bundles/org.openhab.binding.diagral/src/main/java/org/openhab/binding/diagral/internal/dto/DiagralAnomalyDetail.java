@@ -20,7 +20,15 @@ import org.eclipse.jdt.annotation.Nullable;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * The {@link DiagralAnomalyDetail} represents the anomalies reported for a single device.
+ * The {@link DiagralAnomalyDetail} represents the anomalies reported for a single device, as found in
+ * one of the per-category lists of a {@link DiagralAnomalies} response.
+ *
+ * <p>
+ * {@link #deviceIndex} matches {@code DiagralDevice#deviceIndex} for the same physical device, which is
+ * how {@code DiagralHttpClient.isDeviceInhibited()} correlates a device being acted on (by product type
+ * + index) with its anomaly entry here to check for an {@code "inhibited"} entry in {@link
+ * #anomalyNames}.
+ * </p>
  *
  * @author David Martin - Initial contribution
  */
