@@ -147,7 +147,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         }
 
         // Build label
-        String label = alarmSystem.name != null ? alarmSystem.name + " (Diagral Alarm System)"  : "Diagral Alarm System";
+        String label = alarmSystem.name != null ? alarmSystem.name + " (Diagral Alarm System)" : "Diagral Alarm System";
 
         thingDiscovered(DiscoveryResultBuilder.create(thingUID).withBridge(bridgeUID).withLabel(label)
                 .withProperties(properties).withRepresentationProperty(CONFIG_SERIAL_ID).build());
@@ -193,6 +193,11 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
             Map<String, Object> properties = new HashMap<>();
             properties.put(CONFIG_DEVICE_ID, id);
             properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
+
+            Integer deviceIndex = device.deviceIndex;
+            if (deviceIndex != null) {
+                properties.put(CONFIG_DEVICE_INDEX, deviceIndex);
+            }
 
             String type = device.type;
             if (type != null) {

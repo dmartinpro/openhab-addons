@@ -17,6 +17,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
 import org.openhab.core.library.types.DecimalType;
@@ -55,7 +56,7 @@ import org.slf4j.LoggerFactory;
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public class DiagralSystemHandler extends BaseThingHandler {
+public class DiagralSystemHandler extends BaseThingHandler implements DiagralRefreshableHandler {
 
     private final Logger logger = LoggerFactory.getLogger(DiagralSystemHandler.class);
 
@@ -126,7 +127,8 @@ public class DiagralSystemHandler extends BaseThingHandler {
     /**
      * Refreshes the system status from the bridge and updates all channels.
      */
-    private void refreshStatus() {
+    @Override
+    public void refreshStatus() {
         DiagralBridgeHandler bridgeHandler = getBridgeHandler();
         if (bridgeHandler == null) {
             logger.debug("Cannot refresh status - bridge handler not available");
@@ -145,25 +147,25 @@ public class DiagralSystemHandler extends BaseThingHandler {
             return;
         }
 
-        updateChannels(status, config);
+        updateChannels(status, config, bridgeHandler);
     }
 
     /**
      * Updates all channels with the current system status.
      *
      * @param status the system status from the API
+     * @param config the system configuration from the API
+     * @param bridgeHandler the bridge handler, used to fetch the current anomalies
      */
-    private void updateChannels(DiagralSystemStatus status, DiagralSystemConfiguration config) {
+    private void updateChannels(DiagralSystemStatus status, DiagralSystemConfiguration config,
+            DiagralBridgeHandler bridgeHandler) {
         // Update armed status
         String statusStr = status.status;
         if (statusStr != null) {
             updateState(CHANNEL_ARMED_STATUS, new StringType(statusStr));
         }
 
-        // Update anomalies
-        boolean hasAnomalies = false;
-        int anomalyCount = 0;
-
+        // Update central unit battery status
         if (config.centralInformation != null && config.centralInformation.anomalies != null
                 && ((config.centralInformation.anomalies.containsKey(DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT)
                         && config.centralInformation.anomalies.get(DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT))
@@ -173,9 +175,11 @@ public class DiagralSystemHandler extends BaseThingHandler {
         } else {
             updateState(CHANNEL_CENTRAL_LOW_BATTERY, OnOffType.OFF);
         }
-        // Note: Anomaly information would come from a separate API call
-        // For now, we just set defaults
-        updateState(CHANNEL_ANOMALIES_PRESENT, OnOffType.from(hasAnomalies));
+
+        // Update anomalies
+        DiagralAnomalies anomalies = bridgeHandler.getAnomalies();
+        int anomalyCount = anomalies != null ? anomalies.getTotalCount() : 0;
+        updateState(CHANNEL_ANOMALIES_PRESENT, OnOffType.from(anomalyCount > 0));
         updateState(CHANNEL_ANOMALY_COUNT, new DecimalType(anomalyCount));
     }
 
