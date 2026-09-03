@@ -177,27 +177,44 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
             return;
         }
 
-        updateChannels(status, currentGroupId);
+        updateChannels(status, currentGroupId, bridgeHandler);
     }
 
     /**
      * Updates all channels with the current group state.
      *
+     * <p>
+     * The real API's {@code activated_groups} list is only authoritative while {@code status} is one of
+     * the five named whole-system modes ({@code NAMED_SYSTEM_MODES}, statically imported above) -
+     * confirmed live (2026-09-03) that a group armed directly via
+     * {@link DiagralBridgeHandler#activateGroup(String)} instead flips {@code status} to {@code
+     * TEMPO_GROUP} while leaving {@code activated_groups} empty, giving no per-group visibility. In that
+     * case this falls back to the
+     * bridge's own best-effort record via {@link DiagralBridgeHandler#isGroupDirectlyActive(String)}.
+     * </p>
+     *
      * @param status the system status from the API
      * @param groupId the group ID
+     * @param bridgeHandler the bridge handler, used for the {@code TEMPO_GROUP} fallback described above
      */
-    private void updateChannels(DiagralSystemStatus status, String groupId) {
-        // Check if group is in activated groups list
-        boolean isActive = false;
+    private void updateChannels(DiagralSystemStatus status, String groupId, DiagralBridgeHandler bridgeHandler) {
+        boolean isActive;
+        String systemMode = status.status;
         List<Integer> activatedGroups = status.activatedGroups;
 
-        if (activatedGroups != null) {
+        if (systemMode != null && NAMED_SYSTEM_MODES.contains(systemMode) && activatedGroups != null) {
+            boolean foundInActivatedGroups = false;
             try {
                 int groupIndex = Integer.parseInt(groupId);
-                isActive = activatedGroups.contains(groupIndex);
+                foundInActivatedGroups = activatedGroups.contains(groupIndex);
             } catch (NumberFormatException e) {
                 logger.warn("Invalid group ID format: {}", groupId);
             }
+            isActive = foundInActivatedGroups;
+        } else {
+            // status is TEMPO_GROUP (or an unrecognized value) - activated_groups gives no per-group
+            // detail here, so fall back to what this bridge itself last told the API for this group.
+            isActive = bridgeHandler.isGroupDirectlyActive(groupId);
         }
 
         updateState(CHANNEL_GROUP_ACTIVE, OnOffType.from(isActive));

@@ -232,6 +232,10 @@ sitemap diagral label="Diagral Alarm System" {
   ```
   This is expected and does not indicate a problem with your setup.
 
+- **Directly activating one group leaves the system in a "TEMPO_GROUP" state, not one of the five named modes**: The `armed-status` channel on the `alarm-system` thing normally shows one of `OFF`, `FULL`, `PRESENCE`, `PARTIAL1`, or `PARTIAL2` — but if you activate an individual `group` thing's `active` channel directly (rather than arming the whole system via `mode-control`), the Diagral cloud API reports a sixth, undocumented status value: `TEMPO_GROUP`. In this state, the API's `activated_groups` list is also always empty, giving no way to tell which specific group(s) are actually armed from `/status` alone.
+
+  The binding works around this: each `group` thing's `active` channel trusts the API's `activated_groups` list only while the system is in one of the five named modes (where it's authoritative). When the status is `TEMPO_GROUP` (or any other unrecognized value), the channel instead falls back to the bridge's own record of which groups it has directly activated. This is best-effort, not authoritative — it only reflects actions issued through this binding, so it resets on an openHAB restart and won't see a group armed/disarmed through the official e-ONE app. A whole-system mode command (arming or disarming via `mode-control`) always resets this tracking, since it supersedes any prior direct group activation.
+
 ## Troubleshooting
 
 ### Bridge stays OFFLINE with "Invalid credentials"

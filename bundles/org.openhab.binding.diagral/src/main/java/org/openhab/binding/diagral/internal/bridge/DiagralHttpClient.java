@@ -333,29 +333,54 @@ public class DiagralHttpClient {
     }
 
     /**
-     * Activates a device group
+     * Activates a device group.
      *
      * @param groupId the group ID to activate
-     * @throws DiagralException if the request fails
+     * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
      */
     public void activateGroup(String groupId) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_ACTIVATE_GROUP;
-        String payload = "{\"group_id\":\"" + groupId + "\"}";
+        String payload = buildGroupsPayload(groupId);
         executePost(endpoint, payload, true);
         logger.debug("Group {} activated", groupId);
     }
 
     /**
-     * Disables a device group
+     * Disables a device group.
      *
      * @param groupId the group ID to disable
-     * @throws DiagralException if the request fails
+     * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
      */
     public void disableGroup(String groupId) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_DISABLE_GROUP;
-        String payload = "{\"group_id\":\"" + groupId + "\"}";
+        String payload = buildGroupsPayload(groupId);
         executePost(endpoint, payload, true);
         logger.debug("Group {} disabled", groupId);
+    }
+
+    /**
+     * Builds the JSON body expected by the {@code activate_group}/{@code disable_group} endpoints.
+     *
+     * <p>
+     * The real API rejects the (previously used) {@code {"group_id":"<string>"}} shape with a 422
+     * validation error - it requires {@code {"groups":[<int>,...]}}, a JSON array of numeric group
+     * indices (confirmed against pydiagral's {@code __action_group_system}, and against a live 422
+     * response from the real API: {@code "loc":["body","groups"],"msg":"Field required"}). This binding
+     * only ever activates/disables one group at a time (one openHAB Thing per group), so the array always
+     * has exactly one element.
+     * </p>
+     *
+     * @param groupId the group ID (must be numeric - this is the Diagral group index as a string)
+     * @return the JSON request body, e.g. {@code {"groups":[3]}}
+     * @throws DiagralApiException if {@code groupId} isn't a valid integer
+     */
+    private String buildGroupsPayload(String groupId) throws DiagralApiException {
+        try {
+            int groupIndex = Integer.parseInt(groupId);
+            return "{\"groups\":[" + groupIndex + "]}";
+        } catch (NumberFormatException e) {
+            throw new DiagralApiException("Invalid group ID (must be numeric): " + groupId, 0);
+        }
     }
 
     /**

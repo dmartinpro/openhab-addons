@@ -23,6 +23,8 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.USERN
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -90,6 +92,29 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private @Nullable DiagralSystemDetails cachedDetails;
     private @Nullable DiagralSystemStatus cachedSystemStatus;
     private long cachedSystemStatusTimestamp;
+
+    /**
+     * Best-effort, locally-tracked set of group IDs this bridge has directly activated via {@link
+     * #activateGroup(String)} and not since deactivated/superseded.
+     *
+     * <p>
+     * Exists to work around a real API gap confirmed live (2026-09-03): when a group is armed directly
+     * (as opposed to via a whole-system mode command), {@code GET /status} reports {@code
+     * "status":"TEMPO_GROUP"} ({@link org.openhab.binding.diagral.internal.DiagralBindingConstants#MODE_TEMPO_GROUP})
+     * with an empty {@code activated_groups} list - the API gives no way to tell *which* group(s) are
+     * active in that state. {@code DiagralGroupHandler} falls back to this set (via {@link
+     * #isGroupDirectlyActive(String)}) only when the reported status isn't one of the five named modes
+     * where {@code activated_groups} is authoritative.
+     * </p>
+     *
+     * <p>
+     * This is inherently best-effort, not a source of truth: it only reflects actions issued through this
+     * binding, so it's reset to empty on bridge restart and won't see a group toggled via the official
+     * e-ONE app. It's cleared whenever a whole-system mode command succeeds ({@link #setSystemMode(String)}),
+     * since that supersedes any prior direct group activation.
+     * </p>
+     */
+    private final Set<String> directlyActivatedGroupIds = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructs a new bridge handler.
@@ -519,6 +544,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.setSystemMode(mode);
+            // A named whole-system mode command supersedes any group(s) previously armed directly via
+            // activateGroup() - activated_groups becomes authoritative again once the poll below completes.
+            directlyActivatedGroupIds.clear();
             // Trigger immediate poll to update status
             scheduler.execute(this::poll);
         } catch (DiagralException e) {
@@ -531,7 +559,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *
      * <p>
      * Called by {@code DiagralGroupHandler} in response to an {@code ON} command on the group's
-     * {@code active} channel.
+     * {@code active} channel. On success, also records {@code groupId} in {@link
+     * #directlyActivatedGroupIds} - see that field's Javadoc for why.
      * </p>
      *
      * @param groupId the group ID to activate
@@ -545,6 +574,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.activateGroup(groupId);
+            directlyActivatedGroupIds.add(groupId);
             scheduler.execute(this::poll);
         } catch (DiagralException e) {
             logger.error("Failed to activate group {}: {}", groupId, e.getMessage());
@@ -556,7 +586,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *
      * <p>
      * Called by {@code DiagralGroupHandler} in response to an {@code OFF} command on the group's
-     * {@code active} channel.
+     * {@code active} channel. On success, also removes {@code groupId} from {@link
+     * #directlyActivatedGroupIds} - see that field's Javadoc for why.
      * </p>
      *
      * @param groupId the group ID to disable
@@ -570,10 +601,31 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.disableGroup(groupId);
+            directlyActivatedGroupIds.remove(groupId);
             scheduler.execute(this::poll);
         } catch (DiagralException e) {
             logger.error("Failed to disable group {}: {}", groupId, e.getMessage());
         }
+    }
+
+    /**
+     * Reports whether {@code groupId} is currently believed active based on this bridge's own record of
+     * groups it has directly activated (see {@link #directlyActivatedGroupIds}).
+     *
+     * <p>
+     * Used by {@code DiagralGroupHandler} only as a fallback for when the real API's {@code
+     * activated_groups} list can't be trusted - i.e. when the system-wide status is {@link
+     * org.openhab.binding.diagral.internal.DiagralBindingConstants#MODE_TEMPO_GROUP} rather than one of the
+     * five named modes. This is best-effort local state, not authoritative - see the field's Javadoc for
+     * its limitations.
+     * </p>
+     *
+     * @param groupId the group ID to check
+     * @return {@code true} if this bridge directly activated this group and hasn't since deactivated it or
+     *         issued a whole-system mode command
+     */
+    public boolean isGroupDirectlyActive(String groupId) {
+        return directlyActivatedGroupIds.contains(groupId);
     }
 
     /**

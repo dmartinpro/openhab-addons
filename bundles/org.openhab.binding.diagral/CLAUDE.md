@@ -53,6 +53,19 @@ There is currently no `src/test` directory in this bundle — no unit tests exis
 
 `DiagralHandlerFactory` (`internal/DiagralHandlerFactory.java`) maps `ThingTypeUID` → handler class; it's the single place new thing types must be registered.
 
+**`alarm-system`'s `mode-control` vs. a `group`'s `active` channel are two genuinely different control paths, not
+two views of the same thing.** `mode-control` arms/disarms the whole system via one of five named modes (`OFF`/
+`FULL`/`PRESENCE`/`PARTIAL1`/`PARTIAL2`), each of which arms whichever groups are members of that mode (see each
+group's discovery-time `armModes` property). Directly toggling one `group`'s `active` channel instead calls
+`activate_group`/`disable_group` — confirmed live (2026-09-03) that this puts the whole system into a sixth,
+undocumented status, `TEMPO_GROUP` (`DiagralBindingConstants.MODE_TEMPO_GROUP`), where the API's `activated_groups`
+list is always empty, giving no way to tell which group(s) are actually armed from `/status` alone. `DiagralGroupHandler`
+works around this by falling back to `DiagralBridgeHandler.isGroupDirectlyActive()` — a best-effort, bridge-local
+record of groups it has itself activated — whenever the status isn't one of the five named modes
+(`DiagralBindingConstants.NAMED_SYSTEM_MODES`). This local record resets on bridge restart and won't see a group
+armed via the official e-ONE app; a `mode-control` command always clears it, since a named mode change supersedes
+any prior direct group activation. See the README's "Known Bugs" section for the user-facing writeup.
+
 ### Bridge / HTTP / auth split
 
 Three collaborating classes under `internal/bridge/`:
