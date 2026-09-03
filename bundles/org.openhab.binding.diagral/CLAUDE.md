@@ -57,14 +57,29 @@ There is currently no `src/test` directory in this bundle — no unit tests exis
 two views of the same thing.** `mode-control` arms/disarms the whole system via one of five named modes (`OFF`/
 `FULL`/`PRESENCE`/`PARTIAL1`/`PARTIAL2`), each of which arms whichever groups are members of that mode (see each
 group's discovery-time `armModes` property). Directly toggling one `group`'s `active` channel instead calls
-`activate_group`/`disable_group` — confirmed live (2026-09-03) that this puts the whole system into a sixth,
-undocumented status, `TEMPO_GROUP` (`DiagralBindingConstants.MODE_TEMPO_GROUP`), where the API's `activated_groups`
-list is always empty, giving no way to tell which group(s) are actually armed from `/status` alone. `DiagralGroupHandler`
-works around this by falling back to `DiagralBridgeHandler.isGroupDirectlyActive()` — a best-effort, bridge-local
-record of groups it has itself activated — whenever the status isn't one of the five named modes
-(`DiagralBindingConstants.NAMED_SYSTEM_MODES`). This local record resets on bridge restart and won't see a group
-armed via the official e-ONE app; a `mode-control` command always clears it, since a named mode change supersedes
-any prior direct group activation. See the README's "Known Bugs" section for the user-facing writeup.
+`activate_group`/`disable_group`.
+
+**The real API's `activated_groups` field (in the `/status` response) cannot be trusted at all - confirmed live
+(2026-09-03) empty under every status this binding has observed, including a fully-settled named mode like
+`PRESENCE`.** Arming/disarming is also not instant: for up to a zone's `outputDelay` seconds, `/status` reports a
+transitional value - `TEMPO_1`/`TEMPO_2` while heading to `PARTIAL1`+`PRESENCE`/`PARTIAL2`, or `TEMPO_GROUP` for
+both `FULL` (apparently implemented server-side as "activate every zone") and any direct single-group activation.
+`DiagralBridgeHandler.isGroupActive()` is the single source of truth for a group's active state, and handles both
+findings: while `armed-status` is one of the five named modes (`DiagralBindingConstants.NAMED_SYSTEM_MODES`), it
+derives membership fresh from the cached `DiagralSystemConfiguration`'s per-mode group lists (`presenceGroup`/
+`partialGroup1`/`partialGroup2`, or all groups for `FULL`) - self-correcting every poll regardless of how the mode
+was set, including after a restart or a change made via the official e-ONE app. During any other (transitional)
+status, it falls back to `activeGroupIds`, a best-effort bridge-local record kept current by `setSystemMode()`
+(optimistically, to the target mode's membership, the moment the command succeeds) and by `activateGroup()`/
+`disableGroup()` (a single group at a time). `DiagralGroupHandler` no longer touches `activated_groups` itself -
+it just asks the bridge. See the README's "Known Bugs" section for the user-facing writeup.
+
+**A command that times out client-side may still apply server-side** - confirmed live (2026-09-03) that the
+Diagral cloud API can be slow enough to exceed the 10s request timeout while still processing the request.
+`setSystemMode()`/`activateGroup()`/`disableGroup()` (like the pre-existing `enableDevice()`/`disableDevice()`)
+always trigger an immediate re-poll in a `finally` block regardless of outcome, so the UI re-syncs to the real
+state within one poll cycle rather than staying stale - potentially showing an incorrect armed/disarmed status -
+until the next scheduled interval.
 
 ### Bridge / HTTP / auth split
 
@@ -145,6 +160,7 @@ Child handlers never talk to the network directly — they always go through `ge
 
 - `DiagralBridgeHandler.registerDiscoveryListener` has a `TODO: complete this function` — it currently just stores the listener without pushing already-known devices to it.
 - `DiagralBridgeHandler.poll()` has a `TODO` noting that consecutive poll failures should eventually flip the bridge offline; currently a single failed poll is logged and ignored.
+- `DiagralBridgeHandler.initialize()` never retries a failed *first* authentication attempt — confirmed live (2026-09-03) that a transient network failure during startup (the same flakiness `poll()` already tolerates) leaves the bridge permanently `OFFLINE`/`COMMUNICATION_ERROR` until it's manually reinitialized (disable/enable the Thing, or restart openHAB), even though the exact same failure mid-poll self-heals on the next scheduled cycle. Worth giving `initialize()` the same resilience `poll()` already has, e.g. scheduling a retry rather than giving up after one attempt.
 
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
