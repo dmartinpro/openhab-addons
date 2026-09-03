@@ -55,6 +55,8 @@ public class DiagralBindingConstants {
     public static final String API_BASE_URL = "https://appv3.tt-monitor.com/emerald/v1";
     public static final String API_ENDPOINT_LOGIN = "/users/authenticate/login";
     public static final String API_ENDPOINT_API_KEY = "/users/api_key";
+    public static final String API_ENDPOINT_USER_SYSTEMS = "/users/systems";
+    public static final String API_ENDPOINT_API_KEYS = "/api_keys";
     public static final String API_ENDPOINT_SYSTEMS = "/systems";
     public static final String API_ENDPOINT_CONFIGURATIONS = "/configurations";
     public static final String API_ENDPOINT_STATUS = "/status";

@@ -161,6 +161,38 @@ public class DiagralHttpClient {
     }
 
     /**
+     * Deletes the current API key from the Diagral account.
+     *
+     * <p>
+     * Without this, every bridge (re-)initialization leaves a new, still-valid API key registered
+     * against the user's Diagral account indefinitely, since the cloud API has no automatic expiry for
+     * them. This is called on bridge dispose so re-configuring or removing the bridge doesn't
+     * accumulate orphaned keys server-side.
+     * </p>
+     *
+     * <p>
+     * Re-authenticates first to obtain a fresh access token, since none is cached between calls (mirrors
+     * pydiagral's {@code delete_apikey}, which does the same).
+     * </p>
+     *
+     * @throws DiagralException if the request fails
+     */
+    public void deleteApiKey() throws DiagralException {
+        String apiKey = authManager.getApiKey();
+        if (apiKey == null) {
+            logger.debug("No API key to delete");
+            return;
+        }
+
+        String accessToken = login();
+        String url = API_BASE_URL + API_ENDPOINT_USER_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_API_KEYS
+                + "/" + apiKey;
+        executeWithToken(url, HttpMethod.DELETE, "", accessToken);
+        authManager.clearApiKeys();
+        logger.info("Deleted API key: ...{}", apiKey.substring(Math.max(0, apiKey.length() - 4)));
+    }
+
+    /**
      * Gets the current system status
      *
      * @return the system status

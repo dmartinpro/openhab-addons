@@ -121,6 +121,20 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         stopPolling();
 
+        DiagralHttpClient client = diagralHttpClient;
+        DiagralAuthenticationManager manager = authManager;
+        if (client != null && manager != null && manager.isAuthenticated()) {
+            // Best-effort, fire-and-forget: delete the API key so it doesn't stay registered against
+            // the account indefinitely. Must not block dispose(), so this runs off the calling thread.
+            scheduler.execute(() -> {
+                try {
+                    client.deleteApiKey();
+                } catch (DiagralException e) {
+                    logger.debug("Failed to delete API key on dispose: {}", e.getMessage());
+                }
+            });
+        }
+
         diagralHttpClient = null;
         authManager = null;
         cachedConfiguration = null;
