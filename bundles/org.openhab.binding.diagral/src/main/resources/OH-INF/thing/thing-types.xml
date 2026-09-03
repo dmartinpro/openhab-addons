@@ -71,6 +71,97 @@
 		<config-description-ref uri="thing-type:diagral:device"/>
 	</thing-type>
 
+	<!-- Siren Thing -->
+	<thing-type id="siren">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Siren</label>
+		<description>Siren</description>
+
+		<channels>
+			<channel id="enabled" typeId="device-enabled"/>
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Keypad Thing -->
+	<thing-type id="keypad">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Keypad</label>
+		<description>Keypad</description>
+
+		<channels>
+			<channel id="enabled" typeId="device-enabled"/>
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Plug Thing -->
+	<thing-type id="plug">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Plug</label>
+		<description>Smart plug</description>
+
+		<channels>
+			<channel id="enabled" typeId="device-enabled"/>
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Transmitter Thing -->
+	<thing-type id="transmitter">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Transmitter</label>
+		<description>Generic radio transmitter (not individually controllable via the Diagral API)</description>
+
+		<channels>
+			<channel id="enabled" typeId="device-enabled-readonly"/>
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
+	<!-- Camera Thing -->
+	<thing-type id="camera">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="bridge"/>
+		</supported-bridge-type-refs>
+
+		<label>Diagral Camera</label>
+		<description>Camera (inventory/status only - no image or video access via the Diagral API used by this
+			binding)</description>
+
+		<channels>
+			<channel id="enabled" typeId="device-enabled-readonly"/>
+			<channel id="low-battery" typeId="system.low-battery"/>
+		</channels>
+
+		<representation-property>deviceId</representation-property>
+		<config-description-ref uri="thing-type:diagral:device"/>
+	</thing-type>
+
 	<!-- Device Group Thing -->
 	<thing-type id="group">
 		<supported-bridge-type-refs>
@@ -139,6 +230,14 @@
 		<item-type>Switch</item-type>
 		<label>Device Enabled</label>
 		<description>Enables/disables (un-inhibits/inhibits) the device</description>
+	</channel-type>
+
+	<channel-type id="device-enabled-readonly">
+		<item-type>Switch</item-type>
+		<label>Device Enabled</label>
+		<description>Indicates if the device is enabled (this device type has no enable/disable action in the
+			Diagral API)</description>
+		<state readOnly="true"/>
 	</channel-type>
 
 	<channel-type id="group-active">

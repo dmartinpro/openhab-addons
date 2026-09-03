@@ -20,10 +20,15 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.handler.DiagralCameraHandler;
 import org.openhab.binding.diagral.internal.handler.DiagralContactSensorHandler;
 import org.openhab.binding.diagral.internal.handler.DiagralGroupHandler;
+import org.openhab.binding.diagral.internal.handler.DiagralKeypadHandler;
 import org.openhab.binding.diagral.internal.handler.DiagralMotionSensorHandler;
+import org.openhab.binding.diagral.internal.handler.DiagralPlugHandler;
+import org.openhab.binding.diagral.internal.handler.DiagralSirenHandler;
 import org.openhab.binding.diagral.internal.handler.DiagralSystemHandler;
+import org.openhab.binding.diagral.internal.handler.DiagralTransmitterHandler;
 import org.openhab.core.io.net.http.HttpClientFactory;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
@@ -46,6 +51,11 @@ import org.osgi.service.component.annotations.Reference;
  * <li>Motion Sensor - {@link DiagralMotionSensorHandler}</li>
  * <li>Contact Sensor - {@link DiagralContactSensorHandler}</li>
  * <li>Group - {@link DiagralGroupHandler}</li>
+ * <li>Siren - {@link DiagralSirenHandler}</li>
+ * <li>Keypad - {@link DiagralKeypadHandler}</li>
+ * <li>Plug - {@link DiagralPlugHandler}</li>
+ * <li>Transmitter - {@link DiagralTransmitterHandler}</li>
+ * <li>Camera - {@link DiagralCameraHandler}</li>
  * </ul>
  * </p>
  *
@@ -56,7 +66,8 @@ import org.osgi.service.component.annotations.Reference;
 public class DiagralHandlerFactory extends BaseThingHandlerFactory {
 
     private static final Set<ThingTypeUID> SUPPORTED_THING_TYPES_UIDS = Set.of(THING_TYPE_BRIDGE,
-            THING_TYPE_ALARM_SYSTEM, THING_TYPE_MOTION_SENSOR, THING_TYPE_CONTACT_SENSOR, THING_TYPE_GROUP);
+            THING_TYPE_ALARM_SYSTEM, THING_TYPE_MOTION_SENSOR, THING_TYPE_CONTACT_SENSOR, THING_TYPE_GROUP,
+            THING_TYPE_SIREN, THING_TYPE_KEYPAD, THING_TYPE_PLUG, THING_TYPE_TRANSMITTER, THING_TYPE_CAMERA);
 
     private final HttpClient httpClient;
 
@@ -89,6 +100,16 @@ public class DiagralHandlerFactory extends BaseThingHandlerFactory {
             return new DiagralContactSensorHandler(thing);
         } else if (THING_TYPE_GROUP.equals(thingTypeUID)) {
             return new DiagralGroupHandler(thing);
+        } else if (THING_TYPE_SIREN.equals(thingTypeUID)) {
+            return new DiagralSirenHandler(thing);
+        } else if (THING_TYPE_KEYPAD.equals(thingTypeUID)) {
+            return new DiagralKeypadHandler(thing);
+        } else if (THING_TYPE_PLUG.equals(thingTypeUID)) {
+            return new DiagralPlugHandler(thing);
+        } else if (THING_TYPE_TRANSMITTER.equals(thingTypeUID)) {
+            return new DiagralTransmitterHandler(thing);
+        } else if (THING_TYPE_CAMERA.equals(thingTypeUID)) {
+            return new DiagralCameraHandler(thing);
         }
 
         return null;
