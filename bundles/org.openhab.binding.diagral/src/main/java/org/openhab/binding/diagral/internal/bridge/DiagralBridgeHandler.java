@@ -16,6 +16,12 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.CONFI
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.CONFIG_PIN_CODE;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.CONFIG_SERIAL_ID;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.CONFIG_USERNAME;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_FULL;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_OFF;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_PARTIAL1;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_PARTIAL2;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_PRESENCE;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.NAMED_SYSTEM_MODES;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PASSWORD_MISSING;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PINCODE_MISSING;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.SERIALID_MISSING;
@@ -27,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -34,6 +41,7 @@ import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.diagral.internal.DiagralBridgeConfiguration;
 import org.openhab.binding.diagral.internal.discovery.DiagralDiscoveryService;
 import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
+import org.openhab.binding.diagral.internal.dto.DiagralGroup;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemDetails;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
@@ -94,27 +102,29 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private long cachedSystemStatusTimestamp;
 
     /**
-     * Best-effort, locally-tracked set of group IDs this bridge has directly activated via {@link
-     * #activateGroup(String)} and not since deactivated/superseded.
+     * Best-effort, locally-tracked set of group IDs believed active while the real API's {@code /status}
+     * reports a transitional status this binding can't otherwise interpret (e.g. {@code TEMPO_GROUP},
+     * {@code TEMPO_2} - see {@link #isGroupActive(String)}).
      *
      * <p>
-     * Exists to work around a real API gap confirmed live (2026-09-03): when a group is armed directly
-     * (as opposed to via a whole-system mode command), {@code GET /status} reports {@code
-     * "status":"TEMPO_GROUP"} ({@link org.openhab.binding.diagral.internal.DiagralBindingConstants#MODE_TEMPO_GROUP})
-     * with an empty {@code activated_groups} list - the API gives no way to tell *which* group(s) are
-     * active in that state. {@code DiagralGroupHandler} falls back to this set (via {@link
-     * #isGroupDirectlyActive(String)}) only when the reported status isn't one of the five named modes
-     * where {@code activated_groups} is authoritative.
-     * </p>
-     *
-     * <p>
-     * This is inherently best-effort, not a source of truth: it only reflects actions issued through this
-     * binding, so it's reset to empty on bridge restart and won't see a group toggled via the official
-     * e-ONE app. It's cleared whenever a whole-system mode command succeeds ({@link #setSystemMode(String)}),
-     * since that supersedes any prior direct group activation.
+     * Exists to work around a real API gap confirmed live (2026-09-03): the {@code activated_groups} field
+     * in the {@code /status} response was observed to stay empty across every status this binding has ever
+     * seen - including a fully-settled, named mode like {@code PRESENCE} - so it cannot be trusted at all,
+     * for any status. {@link #isGroupActive(String)} instead derives group membership from this bridge's
+     * own cached {@link DiagralSystemConfiguration} (each mode's static {@code presenceGroup}/{@code
+     * partialGroup1}/{@code partialGroup2}/all-groups membership) whenever {@code status} is one of the
+     * five named modes - re-derived fresh on every poll, so it self-corrects after a restart or after a
+     * mode change made outside openHAB (e.g. the official e-ONE app). This set is only consulted as a
+     * fallback for the remaining case: a transitional status ({@code TEMPO_*}) where the real, final group
+     * membership isn't yet knowable from configuration alone. It's kept up to date by {@link
+     * #setSystemMode(String)} (optimistically, to the target mode's membership, immediately on command
+     * success - covers the exit-delay window before the poll sees the final named mode) and by {@link
+     * #activateGroup(String)}/{@link #disableGroup(String)} (a single group at a time, for direct
+     * activation outside any mode). Being local/optimistic state, it resets on bridge restart and won't see
+     * a change made outside this binding until the next named-mode poll re-derives from configuration.
      * </p>
      */
-    private final Set<String> directlyActivatedGroupIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> activeGroupIds = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructs a new bridge handler.
@@ -544,13 +554,25 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.setSystemMode(mode);
-            // A named whole-system mode command supersedes any group(s) previously armed directly via
-            // activateGroup() - activated_groups becomes authoritative again once the poll below completes.
-            directlyActivatedGroupIds.clear();
-            // Trigger immediate poll to update status
-            scheduler.execute(this::poll);
+            // Optimistically set the tracked active-group set to this mode's target membership right away
+            // - covers the transitional status (e.g. TEMPO_2) the real system reports for up to a group's
+            // outputDelay seconds before /status settles on the final named mode, at which point
+            // isGroupActive() switches back to deriving straight from configuration anyway. Only done on
+            // confirmed success - see the finally block below for the ambiguous (timeout/error) case.
+            Set<String> targetMembers = groupsForMode(mode);
+            if (targetMembers != null) {
+                activeGroupIds.clear();
+                activeGroupIds.addAll(targetMembers);
+            }
         } catch (DiagralException e) {
             logger.error("Failed to set system mode to {}: {}", mode, e.getMessage());
+        } finally {
+            // Live-verified (2026-09-03): a mode command can time out client-side while still having been
+            // applied server-side (the Diagral cloud API is prone to slow/dropped responses under load).
+            // Always re-poll regardless of outcome so the UI re-syncs to the real state within one poll
+            // cycle instead of staying stale - possibly showing a stale ARMED status - until the next
+            // scheduled interval. Mirrors the same fix already applied to enableDevice()/disableDevice().
+            scheduler.execute(this::poll);
         }
     }
 
@@ -559,8 +581,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *
      * <p>
      * Called by {@code DiagralGroupHandler} in response to an {@code ON} command on the group's
-     * {@code active} channel. On success, also records {@code groupId} in {@link
-     * #directlyActivatedGroupIds} - see that field's Javadoc for why.
+     * {@code active} channel. On success, also records {@code groupId} in {@link #activeGroupIds} - see
+     * that field's Javadoc for why.
      * </p>
      *
      * @param groupId the group ID to activate
@@ -574,10 +596,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.activateGroup(groupId);
-            directlyActivatedGroupIds.add(groupId);
-            scheduler.execute(this::poll);
+            activeGroupIds.add(groupId);
         } catch (DiagralException e) {
             logger.error("Failed to activate group {}: {}", groupId, e.getMessage());
+        } finally {
+            // Always re-poll regardless of outcome - see setSystemMode()'s finally block for why.
+            scheduler.execute(this::poll);
         }
     }
 
@@ -586,8 +610,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *
      * <p>
      * Called by {@code DiagralGroupHandler} in response to an {@code OFF} command on the group's
-     * {@code active} channel. On success, also removes {@code groupId} from {@link
-     * #directlyActivatedGroupIds} - see that field's Javadoc for why.
+     * {@code active} channel. On success, also removes {@code groupId} from {@link #activeGroupIds} - see
+     * that field's Javadoc for why.
      * </p>
      *
      * @param groupId the group ID to disable
@@ -601,31 +625,82 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         try {
             client.disableGroup(groupId);
-            directlyActivatedGroupIds.remove(groupId);
-            scheduler.execute(this::poll);
+            activeGroupIds.remove(groupId);
         } catch (DiagralException e) {
             logger.error("Failed to disable group {}: {}", groupId, e.getMessage());
+        } finally {
+            // Always re-poll regardless of outcome - see setSystemMode()'s finally block for why.
+            scheduler.execute(this::poll);
         }
     }
 
     /**
-     * Reports whether {@code groupId} is currently believed active based on this bridge's own record of
-     * groups it has directly activated (see {@link #directlyActivatedGroupIds}).
+     * Reports whether {@code groupId} is currently active.
      *
      * <p>
-     * Used by {@code DiagralGroupHandler} only as a fallback for when the real API's {@code
-     * activated_groups} list can't be trusted - i.e. when the system-wide status is {@link
-     * org.openhab.binding.diagral.internal.DiagralBindingConstants#MODE_TEMPO_GROUP} rather than one of the
-     * five named modes. This is best-effort local state, not authoritative - see the field's Javadoc for
-     * its limitations.
+     * Called by {@code DiagralGroupHandler} to drive a group thing's {@code active} channel. Confirmed live
+     * (2026-09-03) that the real API's {@code activated_groups} field cannot be trusted for this under any
+     * status, so this derives the answer itself: while {@code status} is one of the five named modes, it's
+     * computed fresh from this mode's static group membership in the cached {@link
+     * DiagralSystemConfiguration} (self-correcting every poll, regardless of how the mode was set);
+     * otherwise (a transitional {@code TEMPO_*} status) it falls back to {@link #activeGroupIds}, this
+     * bridge's own best-effort record of the last group action it issued - see that field's Javadoc.
      * </p>
      *
      * @param groupId the group ID to check
-     * @return {@code true} if this bridge directly activated this group and hasn't since deactivated it or
-     *         issued a whole-system mode command
+     * @return {@code true} if this group is currently believed active
      */
-    public boolean isGroupDirectlyActive(String groupId) {
-        return directlyActivatedGroupIds.contains(groupId);
+    public boolean isGroupActive(String groupId) {
+        DiagralSystemStatus status = getSystemStatus();
+        String mode = status == null ? null : status.status;
+        if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
+            Set<String> members = groupsForMode(mode);
+            return members != null && members.contains(groupId);
+        }
+        return activeGroupIds.contains(groupId);
+    }
+
+    /**
+     * Computes the set of group IDs a given whole-system mode arms, from the cached system configuration's
+     * static per-mode membership lists.
+     *
+     * @param mode one of the five named modes ({@link
+     *            org.openhab.binding.diagral.internal.DiagralBindingConstants#NAMED_SYSTEM_MODES})
+     * @return the member group IDs for {@code mode}, or {@code null} if the system configuration isn't
+     *         cached yet (too early to tell) or {@code mode} isn't a recognized named mode
+     */
+    private @Nullable Set<String> groupsForMode(String mode) {
+        DiagralSystemConfiguration config = getSystemConfiguration();
+        if (config == null) {
+            return null;
+        }
+        switch (mode) {
+            case MODE_OFF:
+                return Set.of();
+            case MODE_FULL:
+                List<DiagralGroup> groups = config.groups;
+                return groups == null ? Set.of()
+                        : groups.stream().map(g -> String.valueOf(g.index)).collect(Collectors.toSet());
+            case MODE_PRESENCE:
+                return toGroupIdSet(config.presenceGroup);
+            case MODE_PARTIAL1:
+                return toGroupIdSet(config.partialGroup1);
+            case MODE_PARTIAL2:
+                return toGroupIdSet(config.partialGroup2);
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Converts a list of numeric group indices (as parsed from the system configuration) to the string
+     * group-ID form used everywhere else in this binding (thing config, {@link #activeGroupIds}, etc.).
+     *
+     * @param indices the group indices, or {@code null} if that mode has no configured members
+     * @return the group IDs as strings, or an empty set if {@code indices} is {@code null}
+     */
+    private static Set<String> toGroupIdSet(@Nullable List<Integer> indices) {
+        return indices == null ? Set.of() : indices.stream().map(String::valueOf).collect(Collectors.toSet());
     }
 
     /**

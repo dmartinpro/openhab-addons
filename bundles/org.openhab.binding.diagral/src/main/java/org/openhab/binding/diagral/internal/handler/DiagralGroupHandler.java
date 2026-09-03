@@ -14,13 +14,10 @@ package org.openhab.binding.diagral.internal.handler;
 
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
-import java.util.List;
-
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.DiagralConfiguration;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
-import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.Bridge;
@@ -171,51 +168,25 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
             return;
         }
 
-        DiagralSystemStatus status = bridgeHandler.getSystemStatus();
-        if (status == null) {
-            logger.debug("No system status available");
-            return;
-        }
-
-        updateChannels(status, currentGroupId, bridgeHandler);
+        updateChannels(currentGroupId, bridgeHandler);
     }
 
     /**
      * Updates all channels with the current group state.
      *
      * <p>
-     * The real API's {@code activated_groups} list is only authoritative while {@code status} is one of
-     * the five named whole-system modes ({@code NAMED_SYSTEM_MODES}, statically imported above) -
-     * confirmed live (2026-09-03) that a group armed directly via
-     * {@link DiagralBridgeHandler#activateGroup(String)} instead flips {@code status} to {@code
-     * TEMPO_GROUP} while leaving {@code activated_groups} empty, giving no per-group visibility. In that
-     * case this falls back to the
-     * bridge's own best-effort record via {@link DiagralBridgeHandler#isGroupDirectlyActive(String)}.
+     * Confirmed live (2026-09-03) that the real API's {@code activated_groups} field can't be trusted at
+     * all - it was observed empty for every status this binding has seen, including a fully-settled named
+     * mode like {@code PRESENCE}. So the actual derivation lives entirely in {@link
+     * DiagralBridgeHandler#isGroupActive(String)} - this method just asks the bridge and reflects the
+     * answer onto the channels.
      * </p>
      *
-     * @param status the system status from the API
      * @param groupId the group ID
-     * @param bridgeHandler the bridge handler, used for the {@code TEMPO_GROUP} fallback described above
+     * @param bridgeHandler the bridge handler, asked whether this group is currently active
      */
-    private void updateChannels(DiagralSystemStatus status, String groupId, DiagralBridgeHandler bridgeHandler) {
-        boolean isActive;
-        String systemMode = status.status;
-        List<Integer> activatedGroups = status.activatedGroups;
-
-        if (systemMode != null && NAMED_SYSTEM_MODES.contains(systemMode) && activatedGroups != null) {
-            boolean foundInActivatedGroups = false;
-            try {
-                int groupIndex = Integer.parseInt(groupId);
-                foundInActivatedGroups = activatedGroups.contains(groupIndex);
-            } catch (NumberFormatException e) {
-                logger.warn("Invalid group ID format: {}", groupId);
-            }
-            isActive = foundInActivatedGroups;
-        } else {
-            // status is TEMPO_GROUP (or an unrecognized value) - activated_groups gives no per-group
-            // detail here, so fall back to what this bridge itself last told the API for this group.
-            isActive = bridgeHandler.isGroupDirectlyActive(groupId);
-        }
+    private void updateChannels(String groupId, DiagralBridgeHandler bridgeHandler) {
+        boolean isActive = bridgeHandler.isGroupActive(groupId);
 
         updateState(CHANNEL_GROUP_ACTIVE, OnOffType.from(isActive));
         updateState(CHANNEL_GROUP_STATUS, new StringType(isActive ? "Active" : "Inactive"));
