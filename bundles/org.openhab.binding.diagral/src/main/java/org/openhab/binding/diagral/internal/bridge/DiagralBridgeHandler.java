@@ -31,17 +31,21 @@ import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.diagral.internal.DiagralBridgeConfiguration;
 import org.openhab.binding.diagral.internal.discovery.DiagralDiscoveryService;
+import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemDetails;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
 import org.openhab.binding.diagral.internal.exception.DiagralAuthenticationException;
 import org.openhab.binding.diagral.internal.exception.DiagralException;
+import org.openhab.binding.diagral.internal.handler.DiagralRefreshableHandler;
 import org.openhab.core.config.core.status.ConfigStatusMessage;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
+import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
 import org.openhab.core.thing.binding.ConfigStatusBridgeHandler;
+import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.thing.binding.ThingHandlerService;
 import org.openhab.core.types.Command;
 import org.slf4j.Logger;
@@ -55,6 +59,13 @@ import org.slf4j.LoggerFactory;
 @NonNullByDefault
 public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements DiagralClient {
 
+    /**
+     * How long a fetched system status is reused before a fresh call is made. Collapses the handful
+     * of {@link #getSystemStatus()} calls that child handlers make within the same poll tick down to
+     * one real HTTP request, without meaningfully lagging behind the (much longer) polling interval.
+     */
+    private static final long SYSTEM_STATUS_CACHE_TTL_MS = 5000;
+
     private final Logger logger = LoggerFactory.getLogger(DiagralBridgeHandler.class);
 
     private final HttpClient httpClient;
@@ -65,6 +76,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private @Nullable ScheduledFuture<?> pollingJob;
     private @Nullable DiagralSystemConfiguration cachedConfiguration;
     private @Nullable DiagralSystemDetails cachedDetails;
+    private @Nullable DiagralSystemStatus cachedSystemStatus;
+    private long cachedSystemStatusTimestamp;
 
     public DiagralBridgeHandler(Bridge bridge, HttpClient httpClient) {
         super(bridge);
@@ -111,6 +124,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         diagralHttpClient = null;
         authManager = null;
         cachedConfiguration = null;
+        cachedSystemStatus = null;
 
         super.dispose();
     }
@@ -179,17 +193,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         }
 
         try {
-            // Get system status
-            DiagralSystemStatus status = client.getSystemStatus();
+            // Get system status - always fresh, refreshing the short-lived cache used by getSystemStatus()
+            DiagralSystemStatus status = fetchAndCacheSystemStatus(client);
             logger.trace("System status retrieved: {}", status.status);
-
-            // Notify child things about status update
-            // Child thing handlers will call getSystemStatus() to get the latest status
 
             // Ensure bridge stays online
             if (getThing().getStatus() != ThingStatus.ONLINE) {
                 updateStatus(ThingStatus.ONLINE);
             }
+
+            refreshChildHandlers();
         } catch (DiagralAuthenticationException e) {
             logger.warn("Authentication lost during polling, attempting re-authentication");
             scheduler.execute(() -> {
@@ -205,6 +218,38 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             logger.warn("Polling failed: {}, Cause: {}", e.getMessage(), causeMessage);
             // Don't immediately go offline on single poll failure
             // TODO Should go offline after consecutive failures handled by error counter logic
+        }
+    }
+
+    /**
+     * Fetches the current system status from the API and refreshes the short-lived cache used by
+     * {@link #getSystemStatus()}.
+     *
+     * @param client the HTTP client to use
+     * @return the freshly fetched system status
+     * @throws DiagralException if the request fails
+     */
+    private DiagralSystemStatus fetchAndCacheSystemStatus(DiagralHttpClient client) throws DiagralException {
+        DiagralSystemStatus status = client.getSystemStatus();
+        cachedSystemStatus = status;
+        cachedSystemStatusTimestamp = System.currentTimeMillis();
+        return status;
+    }
+
+    /**
+     * Notifies child thing handlers that implement {@link DiagralRefreshableHandler} so their channels
+     * stay up to date on the polling interval, not only on a manual refresh command.
+     */
+    private void refreshChildHandlers() {
+        for (Thing childThing : getThing().getThings()) {
+            ThingHandler handler = childThing.getHandler();
+            if (handler instanceof DiagralRefreshableHandler refreshableHandler) {
+                try {
+                    refreshableHandler.refreshStatus();
+                } catch (RuntimeException e) {
+                    logger.warn("Failed to refresh child thing {}: {}", childThing.getUID(), e.getMessage());
+                }
+            }
         }
     }
 
@@ -242,20 +287,50 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     // Public methods for child thing handlers
 
     /**
-     * Gets the current system status
+     * Gets the current system status.
+     *
+     * <p>
+     * Returns a short-lived cached value (see {@link #SYSTEM_STATUS_CACHE_TTL_MS}) when available, so
+     * that several child handlers refreshing within the same poll tick don't each trigger their own
+     * HTTP call.
+     * </p>
      *
      * @return the system status, or null if not available
      */
     public @Nullable DiagralSystemStatus getSystemStatus() {
+        DiagralSystemStatus cached = cachedSystemStatus;
+        if (cached != null && System.currentTimeMillis() - cachedSystemStatusTimestamp < SYSTEM_STATUS_CACHE_TTL_MS) {
+            return cached;
+        }
+
         DiagralHttpClient client = diagralHttpClient;
         if (client == null) {
             return null;
         }
 
         try {
-            return client.getSystemStatus();
+            return fetchAndCacheSystemStatus(client);
         } catch (DiagralException e) {
             logger.warn("Failed to get system status: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Gets the anomalies currently reported for the system.
+     *
+     * @return the anomalies, or null if not available
+     */
+    public @Nullable DiagralAnomalies getAnomalies() {
+        DiagralHttpClient client = diagralHttpClient;
+        if (client == null) {
+            return null;
+        }
+
+        try {
+            return client.getAnomalies();
+        } catch (DiagralException e) {
+            logger.warn("Failed to get anomalies: {}", e.getMessage());
             return null;
         }
     }
@@ -366,6 +441,62 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             scheduler.execute(this::poll);
         } catch (DiagralException e) {
             logger.error("Failed to disable group {}: {}", groupId, e.getMessage());
+        }
+    }
+
+    /**
+     * Enables (un-inhibits) a device.
+     *
+     * @param productType the product type (e.g. SENSOR, ALARM, COMMAND, PLUG)
+     * @param productId the per-category numeric device index
+     */
+    public void enableDevice(String productType, int productId) {
+        DiagralHttpClient client = diagralHttpClient;
+        if (client == null) {
+            logger.warn("Cannot enable device - HTTP client not initialized");
+            return;
+        }
+
+        try {
+            client.enableProduct(productType, productId);
+        } catch (DiagralException e) {
+            logger.error("Failed to enable device {} ({}): {}", productId, productType, e.getMessage());
+        } finally {
+            // Refresh regardless of outcome: a reported failure may still have actually changed the
+            // device's real state (see the known API quirk in README "Known Limitations" - verification
+            // against the /anomalies endpoint can be inconclusive if its data hasn't caught up yet), so
+            // always re-sync from the live configuration on the next poll rather than risk showing
+            // indefinitely stale cached state.
+            cachedConfiguration = null;
+            scheduler.execute(this::poll);
+        }
+    }
+
+    /**
+     * Disables (inhibits) a device.
+     *
+     * @param productType the product type (e.g. SENSOR, ALARM, COMMAND, PLUG)
+     * @param productId the per-category numeric device index
+     */
+    public void disableDevice(String productType, int productId) {
+        DiagralHttpClient client = diagralHttpClient;
+        if (client == null) {
+            logger.warn("Cannot disable device - HTTP client not initialized");
+            return;
+        }
+
+        try {
+            client.disableProduct(productType, productId);
+        } catch (DiagralException e) {
+            logger.error("Failed to disable device {} ({}): {}", productId, productType, e.getMessage());
+        } finally {
+            // Refresh regardless of outcome: a reported failure may still have actually changed the
+            // device's real state (see the known API quirk in README "Known Limitations" - verification
+            // against the /anomalies endpoint can be inconclusive if its data hasn't caught up yet), so
+            // always re-sync from the live configuration on the next poll rather than risk showing
+            // indefinitely stale cached state.
+            cachedConfiguration = null;
+            scheduler.execute(this::poll);
         }
     }
 

@@ -55,7 +55,7 @@ import org.slf4j.LoggerFactory;
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public class DiagralGroupHandler extends BaseThingHandler {
+public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefreshableHandler {
 
     private final Logger logger = LoggerFactory.getLogger(DiagralGroupHandler.class);
     private @Nullable String groupId;
@@ -146,7 +146,8 @@ public class DiagralGroupHandler extends BaseThingHandler {
     /**
      * Refreshes the group status from the bridge and updates all channels.
      */
-    private void refreshStatus() {
+    @Override
+    public void refreshStatus() {
         String currentGroupId = groupId;
         if (currentGroupId == null) {
             logger.debug("Cannot refresh status - group ID not set");

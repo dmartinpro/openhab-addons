@@ -43,6 +43,14 @@
 			<label>Device ID</label>
 			<description>Unique ID of the device from Diagral system</description>
 		</parameter>
+
+		<parameter name="deviceIndex" type="integer">
+			<label>Device Index</label>
+			<description>Per-category numeric index of the device, used to enable/disable it. Automatically set by
+				discovery.</description>
+			<default>-1</default>
+			<advanced>true</advanced>
+		</parameter>
 	</config-description>
 
 	<!-- Group Configuration -->
