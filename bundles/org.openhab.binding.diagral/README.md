@@ -19,6 +19,7 @@ This binding supports the following thing types:
 The binding supports automatic discovery of Diagral devices.
 
 Once you configure and initialize the Diagral Bridge with valid credentials, the binding will automatically discover:
+
 - The alarm system
 - All motion sensors
 - All contact sensors
@@ -227,9 +228,11 @@ sitemap diagral label="Diagral Alarm System" {
   If the state doesn't match, or verification itself isn't possible, the original error is still reported — this also happens if you check too soon: the `/anomalies` endpoint itself appears to be a periodically-refreshed snapshot on Diagral's side rather than a live query, and has been observed to lag the real device state by tens of seconds. In that case the binding conservatively reports a failure even though the command may have actually succeeded, rather than risk falsely reporting success. Either way, the device's real state is always re-synced on the next poll (whether or not the command was reported as successful), so the channel will self-correct shortly regardless.
 
   You may occasionally see log lines like:
+
   ```
   WARN [internal.bridge.DiagralHttpClient] - Product 1 (SENSOR) action /disable returned HTTP 500 but the resulting device state was verified as applied - treating as a known Diagral API quirk, not a failure
   ```
+
   This is expected and does not indicate a problem with your setup.
 
 - **The API's `activated_groups` field is never populated, under any status — arming/disarming goes through transitional status values while it settles**: The `armed-status` channel on the `alarm-system` thing normally shows one of `OFF`, `FULL`, `PRESENCE`, `PARTIAL1`, or `PARTIAL2` — but extensive live testing (2026-09-03, every mode and every zone) found that `/status`'s `activated_groups` list is **always empty**, even for a fully-settled named mode like `PRESENCE`. It cannot be used to tell which zone(s) are armed under any circumstance.

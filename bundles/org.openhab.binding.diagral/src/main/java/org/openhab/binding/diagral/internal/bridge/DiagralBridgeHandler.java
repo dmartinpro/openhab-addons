@@ -27,6 +27,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PINCO
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.SERIALID_MISSING;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.USERNAME_MISSING;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -832,7 +833,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     @Override
     public Collection<ConfigStatusMessage> getConfigStatus() {
         diagralBridgeConfig = getConfigAs(DiagralBridgeConfiguration.class);
-        Collection<ConfigStatusMessage> messages = List.of();
+        // Must be mutable - List.of() would throw UnsupportedOperationException on the very first add()
+        // below, which is exactly the case (a genuinely missing field) this method exists to report.
+        Collection<ConfigStatusMessage> messages = new ArrayList<>();
 
         String username = diagralBridgeConfig.username;
         if (username == null || username.isEmpty()) {
