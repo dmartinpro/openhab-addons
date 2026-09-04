@@ -129,6 +129,24 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private final Set<String> activeGroupIds = ConcurrentHashMap.newKeySet();
 
     /**
+     * Best-effort record of the whole-system mode to display on {@code DiagralSystemHandler}'s {@code
+     * mode-control} channel (see {@link #getDisplayedMode()}), so that channel reflects the current mode
+     * instead of staying permanently {@code NULL} the way a pure command channel otherwise would.
+     *
+     * <p>
+     * Deliberately shows only one of the five named modes, never a transitional {@code TEMPO_*} value - by
+     * design (2026-09-03): during a transition, {@code mode-control} holds whichever named mode was last
+     * selected/observed rather than a raw undocumented status string. Kept current the same way as {@link
+     * #activeGroupIds}: {@link #setSystemMode(String)} sets it optimistically, immediately on command
+     * success (never on a failed/timed-out call, so a command that didn't actually apply never claims to);
+     * {@link #getDisplayedMode()} also refreshes it opportunistically whenever the real status happens to be
+     * a named mode. Being local/optimistic state, it resets on bridge restart and won't see a mode change
+     * made outside this binding (e.g. the official e-ONE app) until the next poll lands on a named mode.
+     * </p>
+     */
+    private @Nullable String lastKnownMode;
+
+    /**
      * Constructs a new bridge handler.
      *
      * @param bridge the bridge thing to handle
@@ -570,7 +588,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * a command failure back through, so a warning/error in the log is the only feedback.
      * </p>
      *
-     * @param mode the mode to set (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2)
+     * @param mode one of the five named modes (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2) - {@link
+     *            DiagralHttpClient#setSystemMode(String)} rejects anything else before this method's
+     *            optimistic updates below are reached, so by the time they run {@code mode} is known valid
      */
     public void setSystemMode(String mode) {
         DiagralHttpClient client = diagralHttpClient;
@@ -591,6 +611,10 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
                 activeGroupIds.clear();
                 activeGroupIds.addAll(targetMembers);
             }
+            // Same reasoning, for the mode-control channel's own displayed value (see getDisplayedMode()):
+            // show the just-selected mode immediately rather than leaving it stuck on whatever was shown
+            // before this command, for the same transitional window described above.
+            lastKnownMode = mode;
         } catch (DiagralException e) {
             logger.error("Failed to set system mode to {}: {}", mode, e.getMessage());
         } finally {
@@ -685,6 +709,33 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             return members != null && members.contains(groupId);
         }
         return activeGroupIds.contains(groupId);
+    }
+
+    /**
+     * Reports which of the five named modes should currently be displayed on {@code
+     * DiagralSystemHandler}'s {@code mode-control} channel.
+     *
+     * <p>
+     * Called by {@code DiagralSystemHandler} to drive that channel's state. By design (2026-09-03), this
+     * only ever returns one of the five named modes, never a raw transitional {@code TEMPO_*} status
+     * string - mirrors {@link #isGroupActive(String)}'s derivation shape: while the real status is one of
+     * the five named modes, that's authoritative (and this opportunistically refreshes {@link
+     * #lastKnownMode} to match, so the fallback below stays honest); otherwise (a transitional status) it
+     * falls back to {@link #lastKnownMode} - the last named mode this bridge selected or observed, per that
+     * field's Javadoc.
+     * </p>
+     *
+     * @return the mode to display, or {@code null} if none is known yet (e.g. before the first successful
+     *         poll or command)
+     */
+    public @Nullable String getDisplayedMode() {
+        DiagralSystemStatus status = getSystemStatus();
+        String mode = status == null ? null : status.status;
+        if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
+            lastKnownMode = mode;
+            return mode;
+        }
+        return lastKnownMode;
     }
 
     /**
