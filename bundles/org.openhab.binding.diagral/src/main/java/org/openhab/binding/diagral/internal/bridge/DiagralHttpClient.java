@@ -302,7 +302,8 @@ public class DiagralHttpClient {
     }
 
     /**
-     * Sets the system mode
+     * Sets the system mode. Also best-effort logs the {@code status}/{@code activated_groups} carried in
+     * the immediate response (see {@link #logImmediateStatus}) for diagnostic purposes.
      *
      * @param mode the mode to set (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2)
      * @throws DiagralException if the request fails
@@ -329,12 +330,14 @@ public class DiagralHttpClient {
                 throw new DiagralApiException("Invalid system mode: " + mode, 0);
         }
 
-        executePost(endpoint, "", true);
+        String responseBody = executePost(endpoint, "", true);
         logger.debug("System mode set to: {}", mode);
+        logImmediateStatus("setSystemMode(" + mode + ")", responseBody);
     }
 
     /**
-     * Activates a device group.
+     * Activates a device group. Also best-effort logs the {@code status}/{@code activated_groups} carried
+     * in the immediate response (see {@link #logImmediateStatus}) for diagnostic purposes.
      *
      * @param groupId the group ID to activate
      * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
@@ -342,12 +345,14 @@ public class DiagralHttpClient {
     public void activateGroup(String groupId) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_ACTIVATE_GROUP;
         String payload = buildGroupsPayload(groupId);
-        executePost(endpoint, payload, true);
+        String responseBody = executePost(endpoint, payload, true);
         logger.debug("Group {} activated", groupId);
+        logImmediateStatus("activateGroup(" + groupId + ")", responseBody);
     }
 
     /**
-     * Disables a device group.
+     * Disables a device group. Also best-effort logs the {@code status}/{@code activated_groups} carried
+     * in the immediate response (see {@link #logImmediateStatus}) for diagnostic purposes.
      *
      * @param groupId the group ID to disable
      * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
@@ -355,8 +360,38 @@ public class DiagralHttpClient {
     public void disableGroup(String groupId) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_DISABLE_GROUP;
         String payload = buildGroupsPayload(groupId);
-        executePost(endpoint, payload, true);
+        String responseBody = executePost(endpoint, payload, true);
         logger.debug("Group {} disabled", groupId);
+        logImmediateStatus("disableGroup(" + groupId + ")", responseBody);
+    }
+
+    /**
+     * Diagnostic-only helper (added 2026-09-04 while troubleshooting unreliable group-state reflection):
+     * best-effort parses and logs the {@code status}/{@code activated_groups} carried in the immediate
+     * response body of a mode/group command, rather than discarding it the way {@link #setSystemMode},
+     * {@link #activateGroup}, and {@link #disableGroup} previously did.
+     *
+     * <p>
+     * Motivated by cross-referencing pydiagral's test suite: its (unverified, {@code # TO-TEST}-marked)
+     * fixture for {@code activate_group} assumes {@code activated_groups} comes back populated right in
+     * this response, unlike every polled {@code GET /status} response this binding has observed so far.
+     * This is purely diagnostic - parse failures are logged and swallowed, never thrown, so it can never
+     * affect the outcome of the command that produced {@code responseBody}.
+     * </p>
+     *
+     * @param context a short label identifying which call produced this response, for the log line
+     * @param responseBody the raw response body already returned by the command's own HTTP call
+     */
+    private void logImmediateStatus(String context, String responseBody) {
+        try {
+            DiagralSystemStatus status = gson.fromJson(responseBody, DiagralSystemStatus.class);
+            if (status != null) {
+                logger.debug("Immediate response status for {}: status={}, activatedGroups={}", context, status.status,
+                        status.activatedGroups);
+            }
+        } catch (JsonSyntaxException e) {
+            logger.debug("Could not parse immediate response status for {}: {}", context, e.getMessage());
+        }
     }
 
     /**
