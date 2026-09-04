@@ -161,7 +161,7 @@ Child handlers never talk to the network directly — they always go through `ge
 - `DiagralBridgeHandler.registerDiscoveryListener` has a `TODO: complete this function` — it currently just stores the listener without pushing already-known devices to it.
 - `DiagralBridgeHandler.poll()` has a `TODO` noting that consecutive poll failures should eventually flip the bridge offline; currently a single failed poll is logged and ignored.
 - `DiagralBridgeHandler.initialize()` never retries a failed *first* authentication attempt — confirmed live (2026-09-03) that a transient network failure during startup (the same flakiness `poll()` already tolerates) leaves the bridge permanently `OFFLINE`/`COMMUNICATION_ERROR` until it's manually reinitialized (disable/enable the Thing, or restart openHAB), even though the exact same failure mid-poll self-heals on the next scheduled cycle. Worth giving `initialize()` the same resilience `poll()` already has, e.g. scheduling a retry rather than giving up after one attempt.
-- `DiagralBridgeHandler.isGroupActive()` doesn't yet trust the settled status `GROUP`, even though the real API reliably populates `activated_groups` while in that state. **Conclusively proven live (2026-09-04)** by adding `TRACE`-level logging to `isGroupActive()`/`getDisplayedMode()` (kept in the code, controlled by the logger's level, see the diagnostic-only Javadoc notes on both methods) and activating group 2 via the official e-ONE app (external to openHAB, nothing here was triggered through this binding). The exact trace sequence:
+- **[Fixed 2026-09-04, commit `b06c1ec1f`]** `DiagralBridgeHandler.isGroupActive()` didn't trust the settled status `GROUP`, even though the real API reliably populates `activated_groups` while in that state. **Conclusively proven live (2026-09-04)** by adding `TRACE`-level logging to `isGroupActive()`/`getDisplayedMode()` (kept in the code, controlled by the logger's level, see the diagnostic-only Javadoc notes on both methods) and activating group 2 via the official e-ONE app (external to openHAB, nothing here was triggered through this binding). The exact trace sequence that led to the fix (kept here as historical evidence, since mechanism 1 below is still open):
 
   ```
   11:46:34 Failed to get system status: Request timeout
@@ -174,39 +174,16 @@ Child handlers never talk to the network directly — they always go through `ge
   11:50:05 isGroupActive(2): status=GROUP (not a named mode), activeGroupIds=[], result=false
   ```
 
-  Two distinct, independently-confirmed mechanisms are visible here, both need fixing for full reliability:
+  Two distinct mechanisms are visible here, independently confirmed - only the second is fixed by this entry, the first is the separate `refreshChildHandlers()` entry immediately below, still open:
 
-  1. **Timing/race** (`11:46:34`-`11:46:44`): each child handler's own `getSystemStatus()` call independently re-fetches once the 5s cache expires; under real-world network latency (very common against this API, see the many `Request timeout`/`EOFException` lines throughout this bundle's logs) two consecutive handlers can each hit their own 10s timeout and see `status=null`, missing the real data entirely. This is the same root cause as the `refreshChildHandlers()` entry below - one status snapshot per poll, shared across handlers, would prevent it.
-  2. **Logic gap** (`11:50:05`, the smoking gun): once status genuinely settles to `GROUP`, the API handed back `activated_groups:[2]` - the exact correct answer, precisely matching what was armed - and `isGroupActive()` still returned `false`, because `GROUP` isn't in `NAMED_SYSTEM_MODES`, so it falls straight to the empty `activeGroupIds` fallback without ever looking at `activated_groups`. This is a pure logic bug, not a timing issue - the correct data was sitting right there in the response and got ignored.
+  1. **Timing/race** (`11:46:34`-`11:46:44`): each child handler's own `getSystemStatus()` call independently re-fetches once the 5s cache expires; under real-world network latency (very common against this API, see the many `Request timeout`/`EOFException` lines throughout this bundle's logs) two consecutive handlers can each hit their own 10s timeout and see `status=null`, missing the real data entirely. Not fixed by this entry - needs the separate one-status-snapshot-per-poll fix described below.
+  2. **Logic gap** (`11:50:05`, the smoking gun) - **fixed**: once status genuinely settles to `GROUP`, the API handed back `activated_groups:[2]` - the exact correct answer, precisely matching what was armed - and `isGroupActive()` still returned `false`, because `GROUP` isn't in `NAMED_SYSTEM_MODES`, so it fell straight to the empty `activeGroupIds` fallback without ever looking at `activated_groups`. A pure logic bug, not a timing issue - the correct data was sitting right there in the response and got ignored.
 
-  **Proposed fix for mechanism 2** (not yet implemented - mechanism 1 needs the separate one-snapshot-per-poll fix below): add a constant (e.g. `SYSTEM_STATUS_GROUP = "GROUP"`) to `DiagralBindingConstants` alongside `MODE_TEMPO_GROUP`, and give `isGroupActive()` a second authoritative branch before the `activeGroupIds` fallback:
+  **Fix implemented (2026-09-04, commit `b06c1ec1f`)**: added `DiagralBindingConstants.SYSTEM_STATUS_GROUP = "GROUP"` alongside `MODE_TEMPO_GROUP`, and gave `isGroupActive()` a second authoritative branch before the `activeGroupIds` fallback, trusting `activated_groups` directly when status is `GROUP`, and opportunistically resyncing `activeGroupIds` to match so the transitional-status fallback stays honest for the next `TEMPO_GROUP`-only read. **Verified live end-to-end on group 2, both directions** (2026-09-04): activating via e-ONE correctly flipped `active`/`status` to `ON`/`Active`, deactivating correctly flipped them back, the first time in this investigation a group armed outside openHAB was correctly reflected.
 
-  ```java
-  public boolean isGroupActive(String groupId) {
-      DiagralSystemStatus status = getSystemStatus();
-      String mode = status == null ? null : status.status;
-      if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
-          Set<String> members = groupsForMode(mode);
-          return members != null && members.contains(groupId);
-      }
-      if (SYSTEM_STATUS_GROUP.equals(mode) && status.activatedGroups != null) {
-          boolean active = status.activatedGroups.stream().map(String::valueOf).anyMatch(groupId::equals);
-          // Opportunistically resync activeGroupIds to match, mirroring how getDisplayedMode() already
-          // refreshes lastKnownMode - keeps the fallback honest for the next TEMPO_GROUP-only read.
-          if (active) {
-              activeGroupIds.add(groupId);
-          } else {
-              activeGroupIds.remove(groupId);
-          }
-          return active;
-      }
-      return activeGroupIds.contains(groupId);
-  }
-  ```
+  **Scope limitation, still true after the fix, also confirmed live in the same trace above (the `11:47:48` line)**: it does not close the gap during the `TEMPO_GROUP` window itself, before settling to `GROUP` - `activated_groups` was empty at that point too, so there is currently no way to know which group is involved while still transitional. The fix only helps once (and if) it settles to `GROUP`.
 
-  **Scope limitation of this fix, also confirmed live in the same trace above (the `11:47:48` line)**: it does not close the gap during the `TEMPO_GROUP` window itself, before settling to `GROUP` - `activated_groups` was empty at that point too, so there is currently no way to know which group is involved while still transitional. The fix above only helps once (and if) it settles to `GROUP`.
-
-  **Do not** extend this same trust to `getDisplayedMode()`/`mode-control` - `GROUP` is correctly excluded from that channel by design (it's not one of the five arming modes), this fix is scoped to `isGroupActive()` only.
+  `getDisplayedMode()`/`mode-control` deliberately does **not** get this same trust - `GROUP` is correctly excluded from that channel by design (it's not one of the five arming modes); this fix is scoped to `isGroupActive()` only.
 - `DiagralBridgeHandler.refreshChildHandlers()` processes every child handler sequentially within one `poll()` call, but each handler independently calls `getSystemStatus()` (5s TTL cache) rather than sharing one snapshot for the whole cycle. Confirmed live (2026-09-04) while testing group activation from Diagral's own e-ONE app (external to openHAB, so nothing here was triggered through this binding): `DiagralSystemHandler`'s own refresh calls the uncached `getAnomalies()`, which took over 6 seconds in one observed cycle, long enough to push a later handler's `getSystemStatus()` call past the cache TTL and trigger a fresh fetch that landed on a moment where reality had already moved on again. Result: a group's `active` channel stayed `ON` for over two minutes after `armed-status` had already correctly read back `OFF`, only catching up on the next full poll cycle. Not yet fixed; the likely fix is to compute one status snapshot per `poll()` invocation and pass it through to every child handler's refresh, rather than each one independently re-querying the cache.
 
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
