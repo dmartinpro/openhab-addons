@@ -165,7 +165,8 @@ public class DiagralSystemHandler extends BaseThingHandler implements DiagralRef
      *
      * @param status the system status from the API
      * @param config the system configuration from the API
-     * @param bridgeHandler the bridge handler, used to fetch the current anomalies
+     * @param bridgeHandler the bridge handler, used to fetch the current anomalies and the mode to display
+     *            on {@code mode-control}
      */
     private void updateChannels(DiagralSystemStatus status, DiagralSystemConfiguration config,
             DiagralBridgeHandler bridgeHandler) {
@@ -173,6 +174,14 @@ public class DiagralSystemHandler extends BaseThingHandler implements DiagralRef
         String statusStr = status.status;
         if (statusStr != null) {
             updateState(CHANNEL_ARMED_STATUS, new StringType(statusStr));
+        }
+
+        // Mirror the current mode onto mode-control itself, so this writable channel doesn't stay
+        // permanently NULL (see DiagralBridgeHandler.getDisplayedMode() for how it's derived - only ever
+        // one of the five named modes, holding the last selection during a transitional status).
+        String displayedMode = bridgeHandler.getDisplayedMode();
+        if (displayedMode != null) {
+            updateState(CHANNEL_MODE_CONTROL, new StringType(displayedMode));
         }
 
         // Update central unit battery status
