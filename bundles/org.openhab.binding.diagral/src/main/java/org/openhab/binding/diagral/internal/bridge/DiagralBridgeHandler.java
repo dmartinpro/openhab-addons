@@ -25,6 +25,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.NAMED
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PASSWORD_MISSING;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PINCODE_MISSING;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.SERIALID_MISSING;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.SYSTEM_STATUS_GROUP;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.USERNAME_MISSING;
 
 import java.util.ArrayList;
@@ -105,25 +106,28 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
     /**
      * Best-effort, locally-tracked set of group IDs believed active while the real API's {@code /status}
-     * reports a transitional status this binding can't otherwise interpret (e.g. {@code TEMPO_GROUP},
-     * {@code TEMPO_2} - see {@link #isGroupActive(String)}).
+     * reports the transitional {@code TEMPO_GROUP} status (or any other status this binding can't
+     * otherwise interpret) - see {@link #isGroupActive(String)}.
      *
      * <p>
-     * Exists to work around a real API gap confirmed live (2026-09-03): the {@code activated_groups} field
-     * in the {@code /status} response was observed to stay empty across every status this binding has ever
-     * seen - including a fully-settled, named mode like {@code PRESENCE} - so it cannot be trusted at all,
-     * for any status. {@link #isGroupActive(String)} instead derives group membership from this bridge's
-     * own cached {@link DiagralSystemConfiguration} (each mode's static {@code presenceGroup}/{@code
-     * partialGroup1}/{@code partialGroup2}/all-groups membership) whenever {@code status} is one of the
-     * five named modes - re-derived fresh on every poll, so it self-corrects after a restart or after a
-     * mode change made outside openHAB (e.g. the official e-ONE app). This set is only consulted as a
-     * fallback for the remaining case: a transitional status ({@code TEMPO_*}) where the real, final group
-     * membership isn't yet knowable from configuration alone. It's kept up to date by {@link
-     * #setSystemMode(String)} (optimistically, to the target mode's membership, immediately on command
-     * success - covers the exit-delay window before the poll sees the final named mode) and by {@link
-     * #activateGroup(String)}/{@link #disableGroup(String)} (a single group at a time, for direct
-     * activation outside any mode). Being local/optimistic state, it resets on bridge restart and won't see
-     * a change made outside this binding until the next named-mode poll re-derives from configuration.
+     * Exists to work around a real API gap: {@code activated_groups} in the {@code /status} response is
+     * empty for every named mode and for the transitional {@code TEMPO_GROUP} status (confirmed live
+     * 2026-09-03/04), so it cannot be trusted during those. {@link #isGroupActive(String)} instead derives
+     * group membership from this bridge's own cached {@link DiagralSystemConfiguration} while {@code
+     * status} is one of the five named modes, and directly from {@code activated_groups} while {@code
+     * status} is the settled {@code GROUP} status (confirmed live 2026-09-04 to be reliably populated
+     * there, unlike everywhere else) - both self-correcting every poll, regardless of how the state was
+     * set. This set is only consulted as a fallback for what's left: the transitional {@code TEMPO_GROUP}
+     * status (or any other unrecognized one), where the real, final group membership isn't yet knowable
+     * from either source. It's kept up to date by {@link #setSystemMode(String)} (optimistically, to the
+     * target mode's membership, immediately on command success - covers the exit-delay window before the
+     * poll sees the final named mode), by {@link #activateGroup(String)}/{@link #disableGroup(String)} (a
+     * single group at a time, for direct activation outside any mode), and opportunistically by {@link
+     * #isGroupActive(String)} itself whenever it gets an authoritative {@code GROUP}-status answer - so
+     * this fallback stays honest for a later {@code TEMPO_GROUP} read even when the settling was observed
+     * rather than commanded. Still, being local/optimistic state, it resets on bridge restart and won't
+     * see a change made outside this binding until the next poll that lands on a named mode or {@code
+     * GROUP}.
      * </p>
      */
     private final Set<String> activeGroupIds = ConcurrentHashMap.newKeySet();
@@ -689,13 +693,36 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * Reports whether {@code groupId} is currently active.
      *
      * <p>
-     * Called by {@code DiagralGroupHandler} to drive a group thing's {@code active} channel. Confirmed live
-     * (2026-09-03) that the real API's {@code activated_groups} field cannot be trusted for this under any
-     * status, so this derives the answer itself: while {@code status} is one of the five named modes, it's
-     * computed fresh from this mode's static group membership in the cached {@link
-     * DiagralSystemConfiguration} (self-correcting every poll, regardless of how the mode was set);
-     * otherwise (a transitional {@code TEMPO_*} status) it falls back to {@link #activeGroupIds}, this
-     * bridge's own best-effort record of the last group action it issued - see that field's Javadoc.
+     * Called by {@code DiagralGroupHandler} to drive a group thing's {@code active} channel. The real
+     * API's {@code activated_groups} field is untrustworthy under most statuses (confirmed live
+     * 2026-09-03/04 - empty for every named mode and for the transitional {@link
+     * DiagralBindingConstants#MODE_TEMPO_GROUP}), so this derives the answer from whichever source is
+     * actually authoritative for the current status, in order:
+     * </p>
+     * <ol>
+     * <li>One of the five named modes ({@link DiagralBindingConstants#NAMED_SYSTEM_MODES}): membership is
+     * computed fresh from that mode's static group configuration in the cached {@link
+     * DiagralSystemConfiguration} - self-correcting every poll, regardless of how the mode was set.</li>
+     * <li>{@link DiagralBindingConstants#SYSTEM_STATUS_GROUP} (added 2026-09-04): unlike every other
+     * non-named status, {@code activated_groups} <em>is</em> reliably populated once a directly-activated
+     * group has settled here - proven live across three independent, isolated tests (one per group,
+     * 2026-09-04), each returning the exact expected list (e.g. {@code activated_groups:[2]} for group 2).
+     * Trusted directly, the same way named-mode membership is trusted, and used to opportunistically
+     * resync {@link #activeGroupIds} so the fallback below stays honest for a later transitional read.</li>
+     * <li>Anything else (the transitional {@link DiagralBindingConstants#MODE_TEMPO_GROUP}, or any other
+     * unrecognized status): falls back to {@link #activeGroupIds}, this bridge's own best-effort record of
+     * the last group action it issued - see that field's Javadoc. There is currently no way to do better
+     * here: {@code activated_groups} gives no per-group detail while still transitional (confirmed live
+     * 2026-09-04), so a group armed outside openHAB is unavoidably invisible until it settles to {@code
+     * GROUP} or a poll lands on a named mode.</li>
+     * </ol>
+     *
+     * <p>
+     * Logs a {@code TRACE}-level line on every call (added 2026-09-04) showing which branch was taken and
+     * its inputs - added while troubleshooting group state not reliably reflecting activity triggered
+     * outside openHAB (e.g. the official e-ONE app), to make this derivation directly observable rather
+     * than only its output. That same troubleshooting is what proved branch 2 above was reachable and
+     * correct, but unused, before this method trusted it.
      * </p>
      *
      * @param groupId the group ID to check
@@ -704,11 +731,30 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     public boolean isGroupActive(String groupId) {
         DiagralSystemStatus status = getSystemStatus();
         String mode = status == null ? null : status.status;
+        boolean result;
         if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
             Set<String> members = groupsForMode(mode);
-            return members != null && members.contains(groupId);
+            result = members != null && members.contains(groupId);
+            logger.trace("isGroupActive({}): status={} (named mode), configMembers={}, result={}", groupId, mode,
+                    members, result);
+        } else if (SYSTEM_STATUS_GROUP.equals(mode) && status != null && status.activatedGroups != null) {
+            result = status.activatedGroups.stream().map(String::valueOf).anyMatch(groupId::equals);
+            // Opportunistically resync activeGroupIds to this authoritative answer, mirroring how
+            // getDisplayedMode() already refreshes lastKnownMode - keeps the transitional-status fallback
+            // below honest for the next TEMPO_GROUP-only read, where activated_groups gives no detail.
+            if (result) {
+                activeGroupIds.add(groupId);
+            } else {
+                activeGroupIds.remove(groupId);
+            }
+            logger.trace("isGroupActive({}): status={} (settled group status), activatedGroups={}, result={}", groupId,
+                    mode, status.activatedGroups, result);
+        } else {
+            result = activeGroupIds.contains(groupId);
+            logger.trace("isGroupActive({}): status={} (not a named mode), activeGroupIds={}, result={}", groupId, mode,
+                    activeGroupIds, result);
         }
-        return activeGroupIds.contains(groupId);
+        return result;
     }
 
     /**
@@ -725,6 +771,11 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * field's Javadoc.
      * </p>
      *
+     * <p>
+     * Logs a {@code TRACE}-level line on every call (added 2026-09-04) for the same diagnostic reason as
+     * {@link #isGroupActive(String)}'s matching trace line.
+     * </p>
+     *
      * @return the mode to display, or {@code null} if none is known yet (e.g. before the first successful
      *         poll or command)
      */
@@ -733,8 +784,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         String mode = status == null ? null : status.status;
         if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
             lastKnownMode = mode;
+            // Diagnostic-only (added 2026-09-04, see isGroupActive()'s matching trace line for why).
+            logger.trace("getDisplayedMode(): status={} (named mode), caching and returning as lastKnownMode", mode);
             return mode;
         }
+        logger.trace("getDisplayedMode(): status={} (not a named mode), falling back to lastKnownMode={}", mode,
+                lastKnownMode);
         return lastKnownMode;
     }
 

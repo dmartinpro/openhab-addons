@@ -104,23 +104,47 @@ public class DiagralBindingConstants {
     public static final String MODE_PARTIAL2 = "PARTIAL2";
 
     /**
-     * The whole-system {@code status} value the real API reports whenever one or more groups are armed
-     * directly via the {@code activate_group} endpoint, as opposed to a whole-system mode command
-     * ({@link #MODE_OFF}/{@link #MODE_FULL}/{@link #MODE_PRESENCE}/{@link #MODE_PARTIAL1}/{@link
-     * #MODE_PARTIAL2}). Confirmed live (2026-09-03): {@code activated_groups} stays empty in this state -
-     * the API gives no way to tell *which* group(s) are active from {@code /status} alone here, unlike the
-     * five named modes above. See {@link #NAMED_SYSTEM_MODES} and
-     * {@code org.openhab.binding.diagral.internal.handler.DiagralGroupHandler} for how this binding works
-     * around that gap.
+     * The whole-system {@code status} value the real API reports while one or more groups are in the
+     * process of being armed directly via the {@code activate_group} endpoint (or via {@link #MODE_FULL},
+     * which appears to be implemented server-side as "activate every group" - it reports this same value),
+     * as opposed to a whole-system mode command ({@link #MODE_OFF}/{@link #MODE_FULL}/{@link
+     * #MODE_PRESENCE}/{@link #MODE_PARTIAL1}/{@link #MODE_PARTIAL2}). This is purely transitional: it
+     * precedes {@link #SYSTEM_STATUS_GROUP} once arming settles.
+     *
+     * <p>
+     * Confirmed live (2026-09-04, see {@code DiagralBridgeHandler.isGroupActive()}'s Javadoc): {@code
+     * activated_groups} stays empty for the whole duration of this transitional status - the API gives no
+     * way to tell *which* group(s) are involved while still {@code TEMPO_GROUP}, unlike once it settles to
+     * {@link #SYSTEM_STATUS_GROUP}. {@code DiagralBridgeHandler.isGroupActive()} falls back to its own
+     * best-effort tracking for this status, since there is currently no way to do better.
+     * </p>
      */
     public static final String MODE_TEMPO_GROUP = "TEMPO_GROUP";
 
     /**
+     * The whole-system {@code status} value the real API reports once one or more directly-activated
+     * groups have settled (the resting state that follows {@link #MODE_TEMPO_GROUP}).
+     *
+     * <p>
+     * Unlike every other non-named status, {@code activated_groups} is reliably populated here - confirmed
+     * live (2026-09-04) across three independent, isolated tests (one per group), each producing the exact
+     * expected {@code activated_groups} list (e.g. {@code {"status":"GROUP","activated_groups":[2]}} for
+     * group 2). {@code DiagralBridgeHandler.isGroupActive()} trusts this list directly for this status, the
+     * same way it trusts config-derived membership for the five named modes in {@link
+     * #NAMED_SYSTEM_MODES} - see that method's Javadoc for the full derivation and the live evidence that
+     * motivated it.
+     * </p>
+     */
+    public static final String SYSTEM_STATUS_GROUP = "GROUP";
+
+    /**
      * The five whole-system modes for which the real API's {@code /status} response's {@code
-     * activated_groups} list is authoritative. Used by {@code DiagralGroupHandler} to detect when {@code
-     * activated_groups} can be trusted directly, versus when the system is in {@link #MODE_TEMPO_GROUP} (or
-     * any other/unrecognized status) and a group's active state must instead be derived from the bridge's
-     * own best-effort tracking of directly-issued group actions.
+     * activated_groups} list is authoritative via static per-mode configuration. Used by {@code
+     * DiagralBridgeHandler.isGroupActive()} to detect when group membership can be derived from the cached
+     * {@code DiagralSystemConfiguration} directly, as opposed to {@link #SYSTEM_STATUS_GROUP} (authoritative
+     * a different way - see that constant's Javadoc) or {@link #MODE_TEMPO_GROUP}/any other unrecognized
+     * status, where a group's active state must instead fall back to the bridge's own best-effort tracking
+     * of directly-issued group actions.
      */
     public static final Set<String> NAMED_SYSTEM_MODES = Set.of(MODE_OFF, MODE_FULL, MODE_PRESENCE, MODE_PARTIAL1,
             MODE_PARTIAL2);
