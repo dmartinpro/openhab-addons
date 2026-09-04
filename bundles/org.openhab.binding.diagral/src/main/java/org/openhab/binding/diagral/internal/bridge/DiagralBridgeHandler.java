@@ -91,6 +91,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      */
     private static final long SYSTEM_STATUS_CACHE_TTL_MS = 5000;
 
+    /**
+     * How many consecutive plain (non-authentication) poll failures {@link #poll()} tolerates before
+     * flipping the bridge {@code OFFLINE}, rather than staying silently {@code ONLINE} through a sustained
+     * outage forever. Chosen to comfortably ride out the API's normal transient flakiness (this bundle's
+     * live testing has repeatedly seen individual timeouts/{@code EOFException}s self-heal within 1-3
+     * poll cycles) while still surfacing a genuinely sustained failure within a reasonable number of
+     * cycles, proportional to whatever {@code refreshInterval} the user configured.
+     */
+    private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
+
     private final Logger logger = LoggerFactory.getLogger(DiagralBridgeHandler.class);
 
     private final HttpClient httpClient;
@@ -102,6 +112,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private @Nullable ScheduledFuture<?> authRetryJob;
     private @Nullable DiagralSystemConfiguration cachedConfiguration;
     private @Nullable DiagralSystemDetails cachedDetails;
+    private int consecutivePollFailures;
     private @Nullable DiagralSystemStatus cachedSystemStatus;
     private long cachedSystemStatusTimestamp;
 
@@ -336,12 +347,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * Runs on {@code scheduler} at the configured {@code refreshInterval} (see {@link
      * #startPolling(int)}), and is also triggered immediately, off-cycle, after any command that
      * changes device/system state (e.g. {@link #setSystemMode}, {@link #enableDevice}) so the UI
-     * reflects the change promptly rather than waiting for the next scheduled tick. On success, keeps
-     * the bridge {@code ONLINE} and calls {@link #refreshChildHandlers()}. On an authentication failure,
-     * schedules a re-authentication attempt rather than going offline immediately. On any other failure,
-     * logs a warning and leaves the bridge status untouched - a single failed poll doesn't flip the
-     * bridge offline (see the {@code TODO} below for the known gap: there's currently no
-     * consecutive-failure counter to eventually do so).
+     * reflects the change promptly rather than waiting for the next scheduled tick. On success, resets
+     * {@link #consecutivePollFailures}, keeps the bridge {@code ONLINE}, and calls {@link
+     * #refreshChildHandlers()}. On an authentication failure, schedules a re-authentication attempt
+     * rather than going offline immediately (this doesn't touch {@link #consecutivePollFailures}, which
+     * only tracks plain failures - see that field's Javadoc). On any other failure, logs a warning and
+     * increments {@link #consecutivePollFailures}; a single failed poll still doesn't flip the bridge
+     * offline (this API's transient flakiness usually self-heals within 1-3 cycles), but reaching {@link
+     * #MAX_CONSECUTIVE_POLL_FAILURES} in a row does, so a genuinely sustained outage doesn't leave the
+     * bridge silently {@code ONLINE} forever.
      * </p>
      */
     private void poll() {
@@ -355,6 +369,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // Get system status - always fresh, refreshing the short-lived cache used by getSystemStatus()
             DiagralSystemStatus status = fetchAndCacheSystemStatus(client);
             logger.trace("System status retrieved: {}", status.status);
+            consecutivePollFailures = 0;
 
             // Ensure bridge stays online
             if (getThing().getStatus() != ThingStatus.ONLINE) {
@@ -375,8 +390,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         } catch (DiagralException e) {
             String causeMessage = (e.getCause() == null) ? "No cause found" : e.getCause().getMessage();
             logger.warn("Polling failed: {}, Cause: {}", e.getMessage(), causeMessage);
-            // Don't immediately go offline on single poll failure
-            // TODO Should go offline after consecutive failures handled by error counter logic
+            // Don't go offline on an isolated failure - this API's transient flakiness usually self-heals
+            // within 1-3 cycles - but a sustained outage shouldn't leave the bridge silently ONLINE
+            // forever either, so flip OFFLINE once too many consecutive failures pile up.
+            consecutivePollFailures++;
+            if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                logger.warn("Bridge going OFFLINE after {} consecutive poll failures", consecutivePollFailures);
+                updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
+                        consecutivePollFailures + " consecutive poll failures - last error: " + e.getMessage());
+            }
         }
     }
 
