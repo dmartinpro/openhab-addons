@@ -397,11 +397,28 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     /**
      * Notifies child thing handlers that implement {@link DiagralRefreshableHandler} so their channels
      * stay up to date on the polling interval, not only on a manual refresh command.
+     *
+     * <p>
+     * Re-stamps {@link #cachedSystemStatusTimestamp} to "now" immediately before each handler's {@link
+     * DiagralRefreshableHandler#refreshStatus()} call (added 2026-09-04, see the entry in this bundle's
+     * {@code CLAUDE.md} for the live-verified failure it fixes). This exists because every handler
+     * independently calls {@link #getSystemStatus()}, which only skips a fresh network fetch while the
+     * cache is within {@link #SYSTEM_STATUS_CACHE_TTL_MS} - a single slow handler earlier in this same
+     * loop (confirmed live: {@code DiagralSystemHandler}'s uncached {@link #getAnomalies()} call took over
+     * 6 seconds in one observed cycle) can otherwise let that window lapse for every handler still to
+     * come, each of which then risks its own slow/failing independent fetch instead of reusing the one
+     * snapshot this whole poll cycle is meant to share. Re-stamping right before each call keeps the
+     * shared snapshot looking fresh for the handler about to use it, without changing the underlying
+     * value or touching {@link DiagralRefreshableHandler}'s signature.
+     * </p>
      */
     private void refreshChildHandlers() {
         for (Thing childThing : getThing().getThings()) {
             ThingHandler handler = childThing.getHandler();
             if (handler instanceof DiagralRefreshableHandler refreshableHandler) {
+                if (cachedSystemStatus != null) {
+                    cachedSystemStatusTimestamp = System.currentTimeMillis();
+                }
                 try {
                     refreshableHandler.refreshStatus();
                 } catch (RuntimeException e) {
@@ -468,7 +485,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * <p>
      * Returns a short-lived cached value (see {@link #SYSTEM_STATUS_CACHE_TTL_MS}) when available, so
      * that several child handlers refreshing within the same poll tick don't each trigger their own
-     * HTTP call.
+     * HTTP call. {@link #refreshChildHandlers()} re-stamps the cache's timestamp before each handler it
+     * calls, so in practice every handler within one poll cycle sees this same snapshot rather than
+     * racing the TTL against how long earlier handlers in that same cycle took.
      * </p>
      *
      * @return the system status, or null if not available
