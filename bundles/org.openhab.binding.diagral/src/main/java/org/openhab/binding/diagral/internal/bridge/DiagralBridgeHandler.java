@@ -51,6 +51,7 @@ import org.openhab.binding.diagral.internal.exception.DiagralAuthenticationExcep
 import org.openhab.binding.diagral.internal.exception.DiagralException;
 import org.openhab.binding.diagral.internal.handler.DiagralRefreshableHandler;
 import org.openhab.core.config.core.status.ConfigStatusMessage;
+import org.openhab.core.config.discovery.ScanListener;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
@@ -437,11 +438,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * </p>
      *
      * <p>
-     * <b>Known gap (see {@code CLAUDE.md} "Known incomplete areas"):</b> this currently only stores the
-     * listener reference - it doesn't push already-discovered devices to it immediately (the commented-
-     * out calls below are a placeholder for that). In practice this isn't a functional problem because
-     * {@code DiagralDiscoveryService.startScan()} always re-reads the full configuration itself rather
-     * than relying on a push from here.
+     * <b>[Fixed 2026-09-04]</b> Previously only stored the listener reference without pushing
+     * already-known devices to it (see {@code CLAUDE.md} "Known incomplete areas" for the original gap
+     * this closes). Now triggers a catch-up scan on the newly registered listener via its inherited
+     * {@code startScan(ScanListener)} - the same public entry point the openHAB framework itself uses -
+     * so a listener registering after the bridge already has a populated configuration immediately sees
+     * every currently-known device, rather than only ever seeing devices discovered by a future scan.
      * </p>
      *
      * @param listener the discovery service to register
@@ -452,9 +454,19 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     public boolean registerDiscoveryListener(DiagralDiscoveryService listener) {
         if (discoveryService == null) {
             discoveryService = listener;
-            // getFullLights().forEach(listener::addLightDiscovery);
-            // getFullSensors().forEach(listener::addSensorDiscovery);
-            // getFullGroups().forEach(listener::addGroupDiscovery);
+            listener.startScan(new ScanListener() {
+                @Override
+                public void onFinished() {
+                    // No-op: nothing extra needed once this catch-up scan completes - startScan() has
+                    // already emitted a discovery result for everything currently known.
+                }
+
+                @Override
+                public void onErrorOccurred(@Nullable Exception exception) {
+                    String message = exception == null ? "unknown error" : exception.getMessage();
+                    logger.debug("Catch-up scan for newly registered discovery listener failed: {}", message);
+                }
+            });
             return true;
         }
 
