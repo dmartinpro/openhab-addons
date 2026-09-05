@@ -12,8 +12,12 @@
  */
 package org.openhab.binding.diagral.internal.bridge;
 
+import java.util.Locale;
+
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.openhab.binding.diagral.internal.dto.DiagralLoginRequest;
+import org.openhab.binding.diagral.internal.exception.DiagralAuthenticationException;
 import org.openhab.binding.diagral.internal.exception.DiagralException;
 import org.openhab.binding.diagral.internal.util.DiagralCryptoUtil;
 import org.slf4j.Logger;
@@ -48,6 +52,21 @@ public class DiagralAuthenticationManager {
     private boolean authenticated = false;
 
     /**
+     * The API key this manager most recently held before {@link #clearApiKeys()} retired it, kept so it
+     * can still be deleted server-side even though it is no longer usable for signing.
+     *
+     * <p>
+     * Exists because the Diagral cloud API mints a brand-new key pair on every {@code
+     * DiagralHttpClient.authenticate()} and never expires the old one: without this, each
+     * re-authentication (which the 401/403 path triggers by clearing the keys first) would silently leave
+     * another live API key registered against the user's account forever. Drained exactly once by {@link
+     * #takeSupersededApiKey()}, which {@code DiagralHttpClient.authenticate()} calls to delete it before
+     * generating the replacement.
+     * </p>
+     */
+    private @Nullable String supersededApiKey;
+
+    /**
      * Constructs a new authentication manager for one Diagral account/box.
      *
      * @param username the Diagral account's email address
@@ -72,12 +91,18 @@ public class DiagralAuthenticationManager {
     }
 
     /**
-     * Gets the Diagral account's password.
+     * Builds the login request body for this account's credentials.
      *
-     * @return the password supplied at construction
+     * <p>
+     * Deliberately returns a ready-made {@link DiagralLoginRequest} rather than exposing a {@code
+     * getPassword()} accessor, so the account password never has to leave this class - it goes straight
+     * from here into the JSON body {@code DiagralHttpClient.login()} sends.
+     * </p>
+     *
+     * @return a login request carrying this account's username and password
      */
-    public String getPassword() {
-        return password;
+    public DiagralLoginRequest createLoginRequest() {
+        return new DiagralLoginRequest(username, password);
     }
 
     /**
@@ -108,15 +133,6 @@ public class DiagralAuthenticationManager {
     }
 
     /**
-     * Gets the currently stored secret key, if any.
-     *
-     * @return the secret key, or null if not currently authenticated
-     */
-    public synchronized @Nullable String getSecretKey() {
-        return secretKey;
-    }
-
-    /**
      * Checks whether this manager currently holds a valid API key/secret key pair.
      *
      * @return {@code true} if authenticated and both keys are present
@@ -139,9 +155,18 @@ public class DiagralAuthenticationManager {
     }
 
     /**
-     * Clears the stored API keys (used when re-authentication is needed)
+     * Clears the stored API keys (used when re-authentication is needed).
+     *
+     * <p>
+     * Also remembers whatever API key was active in {@link #supersededApiKey}, so the next
+     * authentication can delete it server-side rather than orphaning it - see that field's Javadoc.
+     * </p>
      */
     public synchronized void clearApiKeys() {
+        String current = apiKey;
+        if (current != null) {
+            supersededApiKey = current;
+        }
         this.apiKey = null;
         this.secretKey = null;
         this.authenticated = false;
@@ -149,23 +174,73 @@ public class DiagralAuthenticationManager {
     }
 
     /**
-     * Generates the HMAC-SHA256 signature for a Diagral API request
+     * Returns - exactly once - the API key retired by the last {@link #clearApiKeys()} call, so the
+     * caller can delete it from the Diagral account before minting a replacement.
      *
-     * @param timestamp the current Unix timestamp in seconds
-     * @return the HMAC signature as uppercase hexadecimal string
-     * @throws DiagralException if signature generation fails or keys are not available
+     * <p>
+     * Draining rather than merely reading it means a failed deletion attempt isn't retried forever on
+     * every subsequent authentication; the key is simply given up on, which is no worse than the
+     * pre-existing behaviour of never attempting it at all.
+     * </p>
+     *
+     * @return the superseded API key, or {@code null} if there is none pending
      */
-    public synchronized String generateSignature(long timestamp) throws DiagralException {
+    public synchronized @Nullable String takeSupersededApiKey() {
+        String superseded = supersededApiKey;
+        supersededApiKey = null;
+        return superseded;
+    }
+
+    /**
+     * Produces everything one signed Diagral API request needs - API key, timestamp, and matching HMAC -
+     * in a single atomic step.
+     *
+     * <p>
+     * Deliberately does all of it under one lock. The previous shape (a separate {@code isAuthenticated()}
+     * check, {@code generateSignature()} call, and {@code getApiKey()} read from
+     * {@code DiagralHttpClient.executeRequest()}) took the lock three times, so a concurrent {@link
+     * #clearApiKeys()} - which the 401/403 path triggers from whichever thread hit it - could land between
+     * them and produce a request whose {@code X-HMAC} was computed with a key pair that no longer matched
+     * the {@code X-APIKEY} header it was sent with. Returning one immutable {@link SignedRequest} makes
+     * that interleaving impossible.
+     * </p>
+     *
+     * @return the API key, timestamp, and signature to send with a single request
+     * @throws DiagralAuthenticationException if this manager isn't currently holding a valid key pair
+     * @throws DiagralException if the HMAC calculation itself fails
+     */
+    public synchronized SignedRequest signRequest() throws DiagralException {
         String currentApiKey = apiKey;
         String currentSecretKey = secretKey;
 
-        if (currentApiKey == null || currentSecretKey == null) {
-            throw new DiagralException("Cannot generate signature: API keys not available");
+        if (!authenticated || currentApiKey == null || currentSecretKey == null) {
+            throw new DiagralAuthenticationException("Not authenticated - please authenticate first");
         }
 
+        long timestamp = System.currentTimeMillis() / 1000;
         // Data to sign: "timestamp.serialId.apiKey"
         String dataToSign = timestamp + "." + serialId + "." + currentApiKey;
+        String hmac = DiagralCryptoUtil.hmacSha256(dataToSign, currentSecretKey).toLowerCase(Locale.ROOT);
 
-        return DiagralCryptoUtil.hmacSha256(dataToSign, currentSecretKey);
+        return new SignedRequest(currentApiKey, timestamp, hmac);
+    }
+
+    /**
+     * An immutable, self-consistent set of credentials for exactly one signed Diagral API request, as
+     * produced by {@link #signRequest()}.
+     *
+     * <p>
+     * The three values must travel together: the signature is computed over the timestamp and API key it
+     * is returned with, so mixing one request's HMAC with another's key or timestamp yields a request the
+     * API rejects. Bundling them in a record is what lets {@link #signRequest()} hand them out under a
+     * single lock.
+     * </p>
+     *
+     * @param apiKey the API key to send as the {@code X-APIKEY} header
+     * @param timestamp the Unix timestamp (seconds) the signature was computed over, sent as {@code
+     *            X-TIMESTAMP}
+     * @param hmac the lowercase-hex HMAC-SHA256 signature to send as the {@code X-HMAC} header
+     */
+    public record SignedRequest(String apiKey, long timestamp, String hmac) {
     }
 }
