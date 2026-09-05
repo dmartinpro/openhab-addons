@@ -188,6 +188,81 @@ Child handlers never talk to the network directly — they always go through `ge
 
   **Fix implemented**: rather than restructuring `DiagralRefreshableHandler`'s signature to pass a snapshot through explicitly, `refreshChildHandlers()` now re-stamps `cachedSystemStatusTimestamp` to "now" immediately before each handler's `refreshStatus()` call, so every handler in the loop sees the shared snapshot as fresh regardless of how long earlier handlers in that same cycle took. **Verified live** (2026-09-04, no forced/artificial conditions): a real `getAnomalies()` timeout occurred mid-cycle, and the group handlers' checks immediately after it all used the cached status cleanly, no independent re-fetch, no `status=null`, unlike the failure this entry originally documented.
 
+## Security fixes (2026-09-04)
+
+A security review of the whole bundle produced findings S1-S5, all implemented in
+`DiagralAuthenticationManager` and `DiagralHttpClient`. Covered by the bundle's first unit tests
+(`src/test/java/.../bridge/`, 20 tests, JUnit 5 + Mockito - the parent reactor supplies both, no `pom.xml`
+change needed). Each fix was mutation-checked: reverting it makes the matching test fail.
+
+- **S1 - secrets no longer reach the log.** `executeHttpRequest()` used to log *every* response body at
+  `DEBUG`, which included the login response's `access_token` and the API-key response's `api_key` +
+  `secret_key` (the HMAC signing key). Bodies now log at `TRACE` (they are verbose payloads, per the
+  logging guideline), and the two credential-bearing responses are replaced with `REDACTED_BODY` even
+  there, via a `sensitiveResponse` flag threaded through `executeUnauthenticatedPost`/`executeWithToken`.
+  The request line also no longer logs the Jetty `Request` object (whose `toString()` shape is an
+  implementation detail) - just method and URI. `generateApiKey()` no longer logs its whole request body.
+  A second leak on the same path was found *by the test written for this fix*, not by the review: the
+  key-deletion endpoint embeds the API key in its URL path (`/users/systems/{serialId}/api_keys/{apiKey}`),
+  so logging the URI disclosed a live key regardless of the body redaction - and made the masked "Deleted
+  API key ...6789" audit line useless, since the full key sat one line above it. `sanitizeUrlForLog()` now
+  masks that path segment. This leak pre-dated the review (Jetty's `toString()` printed the path too).
+- **S2 - API keys no longer accumulate on the account.** The cloud API mints a new key pair on every
+  authentication and never expires the old one, so each re-auth (any 401/403 triggers one) silently left
+  another live key registered. `authenticate()` now clears the current pair up front - which queues it via
+  `DiagralAuthenticationManager.clearApiKeys()` into `supersededApiKey` - then deletes it with the access
+  token it just obtained, before generating the replacement. Deletion is best-effort and drained exactly
+  once (`takeSupersededApiKey()`), so a failed cleanup never blocks authentication or retries forever.
+- **S3 - HTTP 400 is no longer treated as an expired credential.** It used to sit in the same branch as
+  401/403, so a malformed request (the `activate_group` payload bug was exactly that) discarded a working
+  key and minted a replacement, looping for as long as the bad request was retried. 400 is now a plain
+  `DiagralApiException`. **This did not weaken bad-credential reporting**: `login()`/`generateApiKey()`
+  already re-wrap any `DiagralException` into `DiagralAuthenticationException`, so a 400 during the auth
+  flow still surfaces as one (covered by `badRequestDuringLoginIsStillAnAuthenticationFailure`). *Residual
+  risk, worth watching in the logs*: if Diagral turns out to return 400 for a genuinely expired API key on
+  a signed request, that case would no longer self-heal - it would surface as repeated `Bad request`
+  warnings and eventually trip `MAX_CONSECUTIVE_POLL_FAILURES`.
+- **S4 - narrower credential surface.** Removed the unused `getSecretKey()`, and replaced `getPassword()`
+  with `createLoginRequest()` so the account password never leaves `DiagralAuthenticationManager`.
+- **S5 - request signing is atomic.** `executeRequest()` used to take the manager's lock three times
+  (`isAuthenticated()`, `generateSignature()`, `getApiKey()`); a concurrent `clearApiKeys()` landing
+  between them could send an `X-HMAC` computed with a key pair that no longer matched the `X-APIKEY`
+  header. Replaced by one `signRequest()` call returning an immutable `SignedRequest(apiKey, timestamp,
+  hmac)` record built under a single lock.
+
+**Live-verified 2026-09-04** on the `openhab-dev` Docker container (openHAB 5.1.2, addons bind-mounted from
+`/Users/dmartin/openhab-dev/addons`), which already had this binding's logger at `TRACE` in `log4j2.xml` -
+the strictest condition for S1. Deploying the new jar hot-swapped the bundle, giving an unusually clean A/B
+in one 90-second window, since the two builds' log lines are distinguishable by format:
+
+- **S1 confirmed, both directions.** Across the new bundle's 11 response-log lines: zero occurrences of
+  `"access_token"`/`"secret_key"`/`"api_key"`, two `<redacted: response carries credentials>` markers (login
+  + API-key generation), zero unmasked keys in logged URLs - and ordinary `/status` payloads still present
+  at `TRACE`, so the redaction is targeted rather than a blanket loss of troubleshooting output. In the same
+  window the *old* bundle, disposing, leaked one credential-bearing response body and one **full API key in
+  plaintext in a request URL** (`.../api_keys/<uuid>`) - the exact URL-path leak that the unit test written
+  for S1 caught and that `sanitizeUrlForLog()` now closes. That specific key was deleted server-side moments
+  later by the same dispose, so it is already revoked.
+- **S2 half-confirmed.** The new bundle correctly issued *no* DELETE on its first authentication (nothing to
+  supersede) - the live counterpart of `firstAuthenticationDoesNotDeleteAnything`. The superseded-key path
+  still needs a 401 to exercise; forcing one means temporarily setting a wrong PIN code, which was not done.
+- **Not caused by this change**: the first authentication after the hot swap timed out (10s
+  `REQUEST_TIMEOUT_SECONDS`) because the disposing old bundle and the initializing new one both log in within
+  ~0.4s, on an API already documented here as timeout-prone. This is pre-existing hot-swap behaviour - note
+  `deleteSupersededApiKey()` *reuses* `authenticate()`'s existing access token, so S2 adds no extra login.
+  `attemptInitialAuthentication()` retried after 60s and the bridge came ONLINE, with every child thing
+  following - incidentally re-confirming the `ea329c28d` retry fix.
+
+Still unverified: the S2 DELETE round-trip for a genuinely superseded key, and S5 (which closes a race and
+has no observable behaviour).
+
+**Pre-existing, unrelated build failure**: `mvn clean install` fails at `karaf-feature-verification` with
+`Unable to resolve org.eclipse.xtext.common.types/2.43.0: missing requirement ... org.objectweb.asm
+[9.9.1,10.0.0)`. This is an upstream openHAB core 5.2.0-SNAPSHOT dependency skew reached through
+`openhab-runtime-base` -> `openhab-core-model-item`, nothing to do with this bundle - confirmed by
+reproducing it on a stashed, unmodified tree. Everything before that goal (spotless, compile, tests, XML
+validation, and all three static analysers) passes with zero findings.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation
