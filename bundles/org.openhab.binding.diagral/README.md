@@ -87,10 +87,31 @@ If you need to manually configure one:
 
 | Channel           | Type   | Read/Write | Description                                                    |
 |-------------------|--------|------------|----------------------------------------------------------------|
-| armed-status      | String | Read Only  | Current armed status (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2) |
-| mode-control      | String | Write Only | Control the alarm mode (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2)|
+| armed-status      | String | Read Only  | Current system status — one of ten values, see below           |
+| mode-control      | String | Read/Write | Control the alarm mode (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2); also reflects the current mode |
 | anomalies-present | Switch | Read Only  | Indicates if any anomalies are present in the system           |
 | anomaly-count     | Number | Read Only  | Number of active anomalies in the system                       |
+
+#### `armed-status` values
+
+The channel reports whatever the Diagral cloud API returns, which is more than the five modes you can command.
+All ten are labelled in the UI:
+
+| Value          | Label                          | Meaning                                                                                       |
+|----------------|--------------------------------|-----------------------------------------------------------------------------------------------|
+| `OFF`          | Off                            | Disarmed                                                                                      |
+| `FULL`         | Full                           | Fully armed                                                                                   |
+| `PRESENCE`     | Presence                       | Presence mode                                                                                 |
+| `PARTIAL1`     | Partial 1                      | Partial mode 1                                                                                |
+| `PARTIAL2`     | Partial 2                      | Partial mode 2                                                                                |
+| `TEMPO_1`      | Arming (Partial 1 / Presence)  | Exit delay while arming settles into `PARTIAL1` or `PRESENCE`                                 |
+| `TEMPO_2`      | Arming (Partial 2)             | Exit delay while arming settles into `PARTIAL2`                                               |
+| `TEMPO_GROUP`  | Arming (Group)                 | Exit delay for `FULL` (server-side "activate every group") or any direct zone activation       |
+| `GROUP`        | Active (Group)                 | Settled state after a direct zone activation — not transitional; can persist indefinitely      |
+| `LEARNING_MODE`| Learning Mode (Installation)   | System is in device-enrollment mode and **is not armed**                                      |
+
+Only the first five are sendable on `mode-control`. The other five are observed-only — the system enters
+them by itself, and there is no command that produces them.
 
 ### Motion Sensor Channels
 
@@ -240,7 +261,7 @@ sitemap diagral label="Diagral Alarm System" {
 
 - **The API's `activated_groups` field is never populated, under any status — arming/disarming goes through transitional status values while it settles**: The `armed-status` channel on the `alarm-system` thing normally shows one of `OFF`, `FULL`, `PRESENCE`, `PARTIAL1`, or `PARTIAL2` — but extensive live testing (2026-09-03, every mode and every zone) found that `/status`'s `activated_groups` list is **always empty**, even for a fully-settled named mode like `PRESENCE`. It cannot be used to tell which zone(s) are armed under any circumstance.
 
-  Arming or disarming also isn't instant: for up to a zone's `outputDelay` seconds (typically ~90s), `/status` reports a transitional value instead of the target mode - confirmed values are `TEMPO_1` (arming toward `PARTIAL1`/`PRESENCE`), `TEMPO_2` (toward `PARTIAL2`), and `TEMPO_GROUP` - which, surprisingly, is what `FULL` reports too, as well as directly activating one `group` thing's `active` channel outside any whole-system mode. This suggests `FULL` is implemented server-side as "activate every zone" rather than as its own distinct arming path.
+  Arming or disarming also isn't instant: for up to a zone's `outputDelay` seconds (typically ~90s), `/status` reports a transitional value instead of the target mode - confirmed values are `TEMPO_1` (arming toward `PARTIAL1`/`PRESENCE`), `TEMPO_2` (toward `PARTIAL2`), and `TEMPO_GROUP` - which, surprisingly, is what `FULL` reports too, as well as directly activating one `group` thing's `active` channel outside any whole-system mode. This suggests `FULL` is implemented server-side as "activate every zone" rather than as its own distinct arming path. All of these, plus the settled `GROUP` and `LEARNING_MODE` states, are declared as labelled options on `armed-status` (see the channel table above), so none of them reach you as a raw string.
 
   The binding works around both quirks: instead of trusting `activated_groups`, each `group` thing's `active` channel is derived from the bridge's own cached configuration (which zones belong to which mode - `presenceGroup`/`partialGroup1`/`partialGroup2`, or all zones for `FULL`) whenever `armed-status` is one of the five named modes - this re-derives fresh on every poll, so it self-corrects after a restart or a mode change made outside openHAB. During a transitional status, where the target mode/zone isn't yet knowable from `/status` alone, it falls back to the bridge's own best-effort record of the last arm/disarm action it issued - optimistically set the moment a `mode-control`/group command succeeds, so a zone reads correctly during its own exit delay. This record is inherently best-effort: it resets on an openHAB restart and won't see a change made through the official e-ONE app until the next poll lands on a named mode.
 

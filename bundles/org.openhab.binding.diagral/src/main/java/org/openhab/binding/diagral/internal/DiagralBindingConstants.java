@@ -104,6 +104,40 @@ public class DiagralBindingConstants {
     public static final String MODE_PARTIAL2 = "PARTIAL2";
 
     /**
+     * The whole-system {@code status} value the real API reports during the exit delay while arming
+     * settles into a partial-group-1-based mode.
+     *
+     * <p>
+     * Observed live for both {@link #MODE_PARTIAL1} and {@link #MODE_PRESENCE}. On the installation this
+     * was characterised on, {@code presenceGroup} and {@code partialGroup1} are the same group list, so
+     * {@code PRESENCE} is effectively "arm partial group 1" and shares its timer - whether an installation
+     * with differing lists would still report {@code TEMPO_1} for {@code PRESENCE} has not been observed.
+     * Purely transitional: it precedes the settled named mode.
+     * </p>
+     */
+    public static final String MODE_TEMPO_1 = "TEMPO_1";
+
+    /**
+     * The whole-system {@code status} value the real API reports during the exit delay while arming
+     * settles into {@link #MODE_PARTIAL2}. Purely transitional, like {@link #MODE_TEMPO_1}.
+     */
+    public static final String MODE_TEMPO_2 = "TEMPO_2";
+
+    /**
+     * The whole-system {@code status} value the real API reports while the system is in installation /
+     * device-enrollment mode, driven from the central unit or the official e-ONE app.
+     *
+     * <p>
+     * A settled state rather than a transitional one - observed live (2026-02-27) holding for minutes at
+     * a time across two separate sessions, with {@code activated_groups} empty throughout. Notably the
+     * system is <em>not</em> armed while in it. Included here because it is a value {@code armed-status}
+     * can genuinely publish; like every non-named status it needs no special handling in {@code
+     * DiagralBridgeHandler.isGroupActive()}/{@code getDisplayedMode()}, both of which fall back correctly.
+     * </p>
+     */
+    public static final String SYSTEM_STATUS_LEARNING_MODE = "LEARNING_MODE";
+
+    /**
      * The whole-system {@code status} value the real API reports while one or more groups are in the
      * process of being armed directly via the {@code activate_group} endpoint (or via {@link #MODE_FULL},
      * which appears to be implemented server-side as "activate every group" - it reports this same value),
@@ -136,6 +170,20 @@ public class DiagralBindingConstants {
      * </p>
      */
     public static final String SYSTEM_STATUS_GROUP = "GROUP";
+
+    /**
+     * Every {@code status} value this binding has observed the real API report, and therefore every value
+     * the read-only {@code armed-status} channel can publish.
+     *
+     * <p>
+     * Exists so {@code thing-types.xml}'s {@code armed-status} option list can be checked against it - an
+     * undeclared value reaches the user as a raw, unlabelled string. Kept next to the constants it is
+     * built from so adding a newly-observed status is a single edit rather than two that can drift apart.
+     * </p>
+     */
+    public static final Set<String> ALL_SYSTEM_STATUSES = Set.of(MODE_OFF, MODE_FULL, MODE_PRESENCE, MODE_PARTIAL1,
+            MODE_PARTIAL2, MODE_TEMPO_1, MODE_TEMPO_2, MODE_TEMPO_GROUP, SYSTEM_STATUS_GROUP,
+            SYSTEM_STATUS_LEARNING_MODE);
 
     /**
      * The five whole-system modes for which the real API's {@code /status} response's {@code
