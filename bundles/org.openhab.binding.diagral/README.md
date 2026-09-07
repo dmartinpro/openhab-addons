@@ -96,7 +96,7 @@ If you need to manually configure one:
 
 | Channel       | Type   | Read/Write | Description                                      |
 |---------------|--------|------------|--------------------------------------------------|
-| motion        | Switch | Read Only  | Motion detection state (ON=motion, OFF=no motion)|
+| motion        | Switch | Read Only  | Always `UNDEF` — the cloud API exposes no live motion state (see Known Limitations) |
 | enabled       | Switch | Read/Write | Device enabled state (ON=enabled, OFF=disabled); sending a command enables/disables (un-inhibits/inhibits) the device |
 | low-battery   | Switch | Read Only  | Low battery indicator (ON=low, OFF=normal)       |
 
@@ -104,7 +104,7 @@ If you need to manually configure one:
 
 | Channel       | Type    | Read/Write | Description                                      |
 |---------------|---------|------------|--------------------------------------------------|
-| contact       | Contact | Read Only  | Contact state (OPEN/CLOSED)                      |
+| contact       | Contact | Read Only  | Always `UNDEF` — the cloud API exposes no live open/closed state (see Known Limitations) |
 | enabled       | Switch  | Read/Write | Device enabled state (ON=enabled, OFF=disabled); sending a command enables/disables (un-inhibits/inhibits) the device |
 | low-battery   | Switch  | Read Only  | Low battery indicator (ON=low, OFF=normal)       |
 
@@ -218,6 +218,9 @@ sitemap diagral label="Diagral Alarm System" {
 - **Authentication requirements**: You must have a valid Diagral account with cloud access enabled for your system.
 - **Device support**: Initial implementation focuses on alarm system control, motion sensors, contact sensors, and device groups. Other device types (cameras with video streaming, sirens, switches) may be added in future versions.
 - **Rate limiting**: The Diagral API may impose rate limits. If you experience issues, try increasing the refresh interval.
+- **No live motion or contact state**: The Diagral cloud API used by this binding returns only device inventory, inhibit status and anomalies — it exposes no real-time detection state. The `motion` and `contact` channels therefore report `UNDEF` ("unknown") rather than a value.
+
+  They previously reported a hardcoded `OFF`/`CLOSED`. That was removed deliberately: in an alarm binding a channel that permanently asserts "no motion detected" or "this door is shut" looks like it is working while telling you nothing, and a rule written against it would never fire. `UNDEF` is distinguishable from a genuine `OFF`/`CLOSED`, so a rule can test for it (`if (MySensor.state == UNDEF)`) instead of silently trusting a value that was never real. The channels are kept rather than removed so existing item links continue to resolve.
 
 ### Known Bugs (Diagral Cloud API)
 

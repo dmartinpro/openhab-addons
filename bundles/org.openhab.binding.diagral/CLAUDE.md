@@ -263,6 +263,78 @@ has no observable behaviour).
 reproducing it on a stashed, unmodified tree. Everything before that goal (spotless, compile, tests, XML
 validation, and all three static analysers) passes with zero findings.
 
+## Correctness fixes C1-C5 (2026-09-04)
+
+The same review produced correctness findings C1-C5, all now implemented. Covered by 19 further unit
+tests (`DiagralBridgeHandlerTest`, `DiagralSensorStateTest`); every fix was mutation-checked.
+
+- **C1 - the bridge's mutable state is now safe across threads.** `cachedConfiguration`, `cachedDetails`,
+  `cachedSystemStatus`, `lastKnownMode`, `pollingJob`, `authRetryJob`, `diagralHttpClient`, `authManager`
+  and `discoveryService` are written by the poll/auth thread and read by the framework's command threads,
+  with no `volatile` anywhere in the bundle (only `DiagralAuthenticationManager` synchronised). All are
+  now `volatile`; `consecutivePollFailures` is an `AtomicInteger`. The status value and its timestamp -
+  previously two independent fields that a reader could pair inconsistently - now live in one immutable
+  `Cached<T>` record behind a single `volatile` reference, which is also what gives the configuration
+  cache its TTL (C4).
+- **C2 - polls no longer overlap.** `poll()` runs both on the schedule and off-cycle (submitted by all
+  five command methods), so two could interleave, racing on those caches and duplicating every HTTP call.
+  Now serialised by `pollLock`. Deliberately a lock rather than a "skip if busy" flag: a command-triggered
+  re-poll exists to reflect a change that just happened, so dropping it would reintroduce the stale-UI
+  problem that re-poll was added to fix.
+- **C3 - the initial-authentication retry can no longer outlive `dispose()`.**
+  `attemptInitialAuthentication()` reschedules itself, so a `dispose()` landing while it ran cancelled the
+  old future, missed the new one, and left it retrying - and possibly calling `startPolling()` - on a dead
+  handler. Now guarded by a `disposed` flag, re-checked after the job is published to close the
+  check-then-schedule window. **The non-obvious part**: `BaseThingHandler.thingUpdated()` calls
+  `dispose()` then `initialize()` on the *same* handler instance whenever the thing's configuration is
+  edited, so `initialize()` must reset `disposed` (and the failure counter). A sticky flag would have
+  meant the bridge never came back online after any config change - caught while implementing, and pinned
+  by `disposedFlagIsClearedByReinitialisation`.
+- **C4 - the system configuration cache is time-bounded.** It was invalidated only by this binding's own
+  enable/disable calls (`refreshConfiguration()` had no callers at all), so every device's `enabled` and
+  `low-battery` channel, plus `central-low-battery`, was frozen at the first successful fetch: a sensor
+  inhibited from the e-ONE app, or a battery going flat, was never reflected until openHAB restarted. Now
+  `CONFIGURATION_CACHE_TTL_MS` (5 min) - much longer than the poll interval, since this is by far the
+  largest response the API returns. On a failed refresh the expired entry is served rather than `null`, so
+  a transient API failure leaves channels populated instead of blanking them.
+- **C5 - motion and contact channels report `UNDEF`.** They published a hardcoded `OFF`/`CLOSED`; the API
+  provides no live value for either. In an alarm binding that is worse than silence - the channel asserts
+  "no motion"/"door shut" forever and a rule built on it never fires. The channels are kept (existing item
+  links keep resolving) but now report `UNDEF`, which a rule can test for. Documented in the README's
+  channel tables and Known Limitations. `enabled` and `low-battery` are unaffected and still report real
+  data - pinned by their own regression tests, since the risk when introducing `UNDEF` is over-applying it.
+
+**Live-verified 2026-09-05** on the same `openhab-dev` container. Bridge ONLINE ~4s after the hot swap,
+every child thing following, and no bridge status change since.
+
+- **C4 confirmed with a clean A/B**: the previous build issued **zero** configuration fetches in the 24
+  minutes after its startup burst (frozen exactly as the finding described); the new build re-fetched at
+  `11:06:39`, on the first poll after the 5-minute TTL expired at ~`11:06:01`.
+- **No regression in the security fixes**: 0 credentials in logged response bodies, 0 unmasked keys in
+  logged URLs, redaction markers present.
+- **Two live observations chased down and cleared, not assumed:**
+  - `Initializing handler for thing ... takes more than 5000ms` is **pre-existing** (present continuously
+    since 2026-09-02 and in rotated logs before that, unchanged in frequency). It is finding C8 - handlers
+    calling `refreshStatus()` synchronously from `initialize()`/`bridgeStatusChanged()` - still open.
+  - Startup configuration fetches read 6 where an earlier run read 4. **Within normal variance**: the
+    unchanged code produced 4, 5, 6, 6, 4, 4, 6 across restarts with the same 14 child initialisations (and
+    10-11 when 28 initialised). This is the pre-existing concurrent-fetch race, finding P4 (`getSystem
+    Configuration()` is check-then-fetch with no lock, so handlers initialising together can each miss the
+    empty cache) - not introduced by C1-C5, and not fixed by them either.
+- **Timeout rate unchanged**: 3 `Request timeout`s in ~7 minutes on the new build vs 12 in ~24 minutes on
+  the old - the same documented API flakiness, and two consecutive poll timeouts correctly did *not* trip
+  `MAX_CONSECUTIVE_POLL_FAILURES`. Poll cadence 66s/73s on a 60s fixed delay, so the C2 lock introduces no
+  starvation.
+- **Not live-observable here**: C5. No items are linked to the `motion`/`contact` channels on this system,
+  so openHAB emits no state events for them. Covered by unit tests only; link an item to see `UNDEF`.
+
+**Two regressions were introduced and caught during this work**, both worth remembering:
+1. A sticky `disposed` flag would have meant the bridge never came back online after a config edit, because
+   `BaseThingHandler.thingUpdated()` reuses the handler instance (see C3 above).
+2. `getConfigStatus()` still referenced the `diagralBridgeConfig` field deleted in the C1 rewrite. **Only
+   `mvn clean install` caught it** - `mvn compile`/`mvn test` kept passing against stale incremental
+   classes. Do not treat a passing incremental build as evidence here.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation
