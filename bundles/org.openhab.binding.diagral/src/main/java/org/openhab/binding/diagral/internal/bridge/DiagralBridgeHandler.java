@@ -845,6 +845,116 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
+     * A call into {@link DiagralHttpClient} that returns a value.
+     *
+     * @param <T> the value type
+     */
+    @FunctionalInterface
+    private interface ClientQuery<T> {
+        /**
+         * Performs the call.
+         *
+         * @param client the HTTP client, guaranteed non-null
+         * @return the fetched value
+         * @throws DiagralException if the call fails
+         */
+        T run(DiagralHttpClient client) throws DiagralException;
+    }
+
+    /**
+     * A call into {@link DiagralHttpClient} that changes system state and returns nothing.
+     */
+    @FunctionalInterface
+    private interface ClientCommand {
+        /**
+         * Performs the call.
+         *
+         * @param client the HTTP client, guaranteed non-null
+         * @throws DiagralException if the call fails
+         */
+        void run(DiagralHttpClient client) throws DiagralException;
+    }
+
+    /**
+     * Runs a read against the cloud API, translating "no client" and any failure into {@code null}.
+     *
+     * <p>
+     * Thing handlers deal in nullable values rather than checked exceptions - this is where that
+     * translation happens, once, instead of in each accessor.
+     * </p>
+     *
+     * @param <T> the value type
+     * @param description what is being fetched, used in the warning if it fails
+     * @param query the call to make
+     * @return the fetched value, or {@code null} if the client isn't initialized or the call failed
+     */
+    private <T> @Nullable T query(String description, ClientQuery<T> query) {
+        DiagralHttpClient client = diagralHttpClient;
+        if (client == null) {
+            return null;
+        }
+
+        try {
+            return query.run(client);
+        } catch (DiagralException e) {
+            logger.warn("Failed to get {}: {}", description, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Runs a state-changing command against the cloud API and re-polls afterwards.
+     *
+     * <p>
+     * The re-poll happens in a {@code finally}, regardless of outcome, and that is deliberate:
+     * live-verified (2026-09-03) that a command can time out client-side while having been applied
+     * server-side, since this API is prone to slow responses. Re-polling either way means the UI
+     * re-syncs to reality within one cycle instead of showing a stale armed/disarmed state until the next
+     * scheduled interval.
+     * </p>
+     *
+     * @param description what is being done, used in the log messages
+     * @param command the call to make, plus any bookkeeping that should only happen on success
+     */
+    private void command(String description, ClientCommand command) {
+        DiagralHttpClient client = diagralHttpClient;
+        if (client == null) {
+            logger.warn("Cannot {} - HTTP client not initialized", description);
+            return;
+        }
+
+        try {
+            command.run(client);
+        } catch (DiagralException e) {
+            logger.error("Failed to {}: {}", description, e.getMessage());
+        } finally {
+            scheduler.execute(this::poll);
+        }
+    }
+
+    /**
+     * Runs a device enable/disable command, additionally discarding the cached system configuration so
+     * the follow-up poll re-reads the device's real state.
+     *
+     * @param description what is being done, used in the log messages
+     * @param action the call to make
+     */
+    private void deviceCommand(String description, ClientCommand action) {
+        command(description, client -> {
+            try {
+                action.run(client);
+            } finally {
+                // After the call, not before: invalidating first leaves a window in which a concurrent
+                // reader can fetch the still-unchanged configuration and cache it as fresh, which the
+                // re-poll would then trust. A reported failure may still have changed the device's real
+                // state (see the HTTP-500 quirk in README "Known Limitations"), so the cache is discarded
+                // either way.
+                cachedConfiguration = null;
+            }
+        });
+    }
+
+    /**
      * Gets the anomalies currently reported for the system.
      *
      * <p>
@@ -859,17 +969,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @return the anomalies, or null if not available
      */
     public @Nullable DiagralAnomalies getAnomalies() {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            return null;
-        }
-
-        try {
-            return client.getAnomalies();
-        } catch (DiagralException e) {
-            logger.warn("Failed to get anomalies: {}", e.getMessage());
-            return null;
-        }
+        return query("anomalies", DiagralHttpClient::getAnomalies);
     }
 
     /**
@@ -944,22 +1044,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @return the system details, or null if not available
      */
     public @Nullable DiagralSystemDetails getSystemDetails() {
-        if (cachedDetails != null) {
-            return cachedDetails;
+        DiagralSystemDetails cached = cachedDetails;
+        if (cached != null) {
+            return cached;
         }
 
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            return null;
+        DiagralSystemDetails fetched = query("system details", DiagralHttpClient::getSystemDetails);
+        if (fetched != null) {
+            cachedDetails = fetched;
         }
-
-        try {
-            cachedDetails = client.getSystemDetails();
-            return cachedDetails;
-        } catch (DiagralException e) {
-            logger.warn("Failed to get system details: {}", e.getMessage());
-            return null;
-        }
+        return fetched;
     }
 
     /**
@@ -976,13 +1070,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *            optimistic updates below are reached, so by the time they run {@code mode} is known valid
      */
     public void setSystemMode(String mode) {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            logger.warn("Cannot set system mode - HTTP client not initialized");
-            return;
-        }
-
-        try {
+        command("set system mode to " + mode, client -> {
             client.setSystemMode(mode);
             // Optimistically set the tracked active-group set to this mode's target membership right away
             // - covers the transitional status (e.g. TEMPO_2) the real system reports for up to a group's
@@ -998,16 +1086,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // show the just-selected mode immediately rather than leaving it stuck on whatever was shown
             // before this command, for the same transitional window described above.
             lastKnownMode = mode;
-        } catch (DiagralException e) {
-            logger.error("Failed to set system mode to {}: {}", mode, e.getMessage());
-        } finally {
-            // Live-verified (2026-09-03): a mode command can time out client-side while still having been
-            // applied server-side (the Diagral cloud API is prone to slow/dropped responses under load).
-            // Always re-poll regardless of outcome so the UI re-syncs to the real state within one poll
-            // cycle instead of staying stale - possibly showing a stale ARMED status - until the next
-            // scheduled interval. Mirrors the same fix already applied to enableDevice()/disableDevice().
-            scheduler.execute(this::poll);
-        }
+        });
     }
 
     /**
@@ -1022,21 +1101,10 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @param groupId the group ID to activate
      */
     public void activateGroup(String groupId) {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            logger.warn("Cannot activate group - HTTP client not initialized");
-            return;
-        }
-
-        try {
+        command("activate group " + groupId, client -> {
             client.activateGroup(groupId);
             activeGroupIds.add(groupId);
-        } catch (DiagralException e) {
-            logger.error("Failed to activate group {}: {}", groupId, e.getMessage());
-        } finally {
-            // Always re-poll regardless of outcome - see setSystemMode()'s finally block for why.
-            scheduler.execute(this::poll);
-        }
+        });
     }
 
     /**
@@ -1051,21 +1119,10 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @param groupId the group ID to disable
      */
     public void disableGroup(String groupId) {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            logger.warn("Cannot disable group - HTTP client not initialized");
-            return;
-        }
-
-        try {
+        command("disable group " + groupId, client -> {
             client.disableGroup(groupId);
             activeGroupIds.remove(groupId);
-        } catch (DiagralException e) {
-            logger.error("Failed to disable group {}: {}", groupId, e.getMessage());
-        } finally {
-            // Always re-poll regardless of outcome - see setSystemMode()'s finally block for why.
-            scheduler.execute(this::poll);
-        }
+        });
     }
 
     /**
@@ -1230,25 +1287,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @param productId the per-category numeric device index
      */
     public void enableDevice(String productType, int productId) {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            logger.warn("Cannot enable device - HTTP client not initialized");
-            return;
-        }
-
-        try {
-            client.enableProduct(productType, productId);
-        } catch (DiagralException e) {
-            logger.error("Failed to enable device {} ({}): {}", productId, productType, e.getMessage());
-        } finally {
-            // Refresh regardless of outcome: a reported failure may still have actually changed the
-            // device's real state (see the known API quirk in README "Known Limitations" - verification
-            // against the /anomalies endpoint can be inconclusive if its data hasn't caught up yet), so
-            // always re-sync from the live configuration on the next poll rather than risk showing
-            // indefinitely stale cached state.
-            cachedConfiguration = null;
-            scheduler.execute(this::poll);
-        }
+        deviceCommand("enable device " + productId + " (" + productType + ")",
+                client -> client.enableProduct(productType, productId));
     }
 
     /**
@@ -1263,25 +1303,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @param productId the per-category numeric device index
      */
     public void disableDevice(String productType, int productId) {
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            logger.warn("Cannot disable device - HTTP client not initialized");
-            return;
-        }
-
-        try {
-            client.disableProduct(productType, productId);
-        } catch (DiagralException e) {
-            logger.error("Failed to disable device {} ({}): {}", productId, productType, e.getMessage());
-        } finally {
-            // Refresh regardless of outcome: a reported failure may still have actually changed the
-            // device's real state (see the known API quirk in README "Known Limitations" - verification
-            // against the /anomalies endpoint can be inconclusive if its data hasn't caught up yet), so
-            // always re-sync from the live configuration on the next poll rather than risk showing
-            // indefinitely stale cached state.
-            cachedConfiguration = null;
-            scheduler.execute(this::poll);
-        }
+        deviceCommand("disable device " + productId + " (" + productType + ")",
+                client -> client.disableProduct(productType, productId));
     }
 
     /**

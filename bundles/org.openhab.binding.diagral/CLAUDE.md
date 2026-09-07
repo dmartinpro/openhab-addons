@@ -438,6 +438,37 @@ callbacks if it ever matters.
 short-circuits first). Added `nonThrottlingApiErrorDoesNotBackOff` with a 404 `DiagralApiException` to
 exercise the check itself. A test asserting the right outcome via the wrong path proves nothing.
 
+## D2-D5 (2026-09-07): duplication removed
+
+Pure refactors - no behaviour change intended, and the existing suite plus two new test classes hold that.
+
+- **D2 - `DiagralDiscoveryService`** had five near-identical per-category methods differing only in the
+  thing type and label handed to `discoverDevice()`. Collapsed into one `discoverCategory()` loop driven by
+  a classifier: `fixedKind(...)` for the categories that map 1:1 (sirens, keypads, cameras), and
+  `classifySensor`/`classifyTransmitter` for the two that decide per device (sensor type/refCode, and the
+  transmitter `isPlug` split).
+- **D3 - `DiagralHttpClient`** had the same parse-then-null-check block three times. One generic
+  `parse(body, type, description)` now covers status/configuration/details. **`getAnomalies()` deliberately
+  does not use it**: a null result there means "nothing is wrong with the system", a valid answer, not an
+  unusable payload.
+- **D4 - `DiagralBridgeHandler`** repeated null-client-check → try → log → swallow in eight accessors. Now
+  `query(...)` for reads (failure becomes `null`, since handlers deal in nullable values rather than
+  checked exceptions) and `command(...)` for state changes (logs, then always re-polls in a `finally`).
+  `deviceCommand(...)` adds the configuration-cache invalidation the enable/disable pair needs.
+
+  **A trap worth recording**: the obvious way to write `deviceCommand` is to invalidate the cache *before*
+  the call. That is not equivalent - it leaves a window where a concurrent reader fetches the
+  still-unchanged configuration and caches it as fresh, which the follow-up poll then trusts. The
+  invalidation has to stay *after* the call, in a `finally`, exactly where it was. Caught during
+  implementation, not by a test.
+- **D5 - `DiagralHandlerFactory`**'s ten-branch `if/else` is now a `Map<ThingTypeUID, Function<Thing,
+  ThingHandler>>`, and `SUPPORTED_THING_TYPES_UIDS` is derived from its key set instead of maintained in
+  parallel, so the two can no longer disagree. The bridge stays explicit: it is the one handler needing a
+  collaborator beyond the `Thing`.
+
+New tests: `DiagralHandlerFactoryTest` (the type→handler mapping had no coverage at all, which is the
+riskiest thing about a table-driven rewrite) and `DiagralArmedStatusOptionsTest` from C7.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation
