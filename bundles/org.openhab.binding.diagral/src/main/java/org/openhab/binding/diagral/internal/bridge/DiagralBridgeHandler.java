@@ -35,6 +35,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -101,20 +103,93 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      */
     private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
 
+    /**
+     * How long a fetched system configuration is reused before it is re-fetched.
+     *
+     * <p>
+     * The configuration endpoint carries every device's live {@code inhibited} flag and per-device
+     * {@code anomalies} map - which is what drives each device thing's {@code enabled} and {@code
+     * low-battery} channels, and the alarm system's {@code central-low-battery}. It used to be cached
+     * indefinitely (invalidated only by this binding's own enable/disable calls), so a device inhibited
+     * from the official e-ONE app, or a battery that went flat, was never reflected until openHAB
+     * restarted. For an alarm system a permanently stale low-battery indicator is the wrong failure mode,
+     * hence a bounded lifetime.
+     * </p>
+     *
+     * <p>
+     * Deliberately much longer than the poll interval: this response is by far the largest the API
+     * returns (every sensor, siren, keypad, transmitter, camera and group), so re-fetching it on every
+     * poll would be wasteful, while device inhibit/battery state does not need second-level freshness.
+     * </p>
+     */
+    private static final long CONFIGURATION_CACHE_TTL_MS = 300_000;
+
     private final Logger logger = LoggerFactory.getLogger(DiagralBridgeHandler.class);
 
     private final HttpClient httpClient;
-    private @Nullable DiagralDiscoveryService discoveryService;
-    private @NonNullByDefault({}) DiagralBridgeConfiguration diagralBridgeConfig = null;
-    private @Nullable DiagralAuthenticationManager authManager;
-    private @Nullable DiagralHttpClient diagralHttpClient;
-    private @Nullable ScheduledFuture<?> pollingJob;
-    private @Nullable ScheduledFuture<?> authRetryJob;
-    private @Nullable DiagralSystemConfiguration cachedConfiguration;
-    private @Nullable DiagralSystemDetails cachedDetails;
-    private int consecutivePollFailures;
-    private @Nullable DiagralSystemStatus cachedSystemStatus;
-    private long cachedSystemStatusTimestamp;
+
+    /**
+     * A value fetched from the cloud API together with the moment it was fetched, so a cache entry and
+     * its age can only ever be read as one consistent pair.
+     *
+     * <p>
+     * Exists for thread-safety as much as for tidiness: the value and its timestamp used to be two
+     * separate non-volatile fields written by the poll thread and read by command threads, which could
+     * observe a new value with an old timestamp (or vice versa) and mis-judge freshness. Holding both in
+     * one immutable record behind a single {@code volatile} reference makes that impossible.
+     * </p>
+     *
+     * @param <T> the cached value's type
+     * @param value the cached value
+     * @param timestampMillis when it was fetched, from {@link System#currentTimeMillis()}
+     */
+    private record Cached<T> (T value, long timestampMillis) {
+
+        /**
+         * Reports whether this entry is still within its time-to-live.
+         *
+         * @param now the current time in milliseconds
+         * @param ttlMillis how long an entry stays usable
+         * @return {@code true} if the entry may still be served without re-fetching
+         */
+        boolean isFreshAt(long now, long ttlMillis) {
+            return now - timestampMillis < ttlMillis;
+        }
+    }
+
+    // Every mutable field below is written by whichever thread runs the poll/authentication and read by
+    // the framework's command threads, so each is volatile (or an atomic/concurrent type). Nothing here
+    // is guarded by a monitor - reads are individually consistent, which is all any of these need.
+    private volatile @Nullable DiagralDiscoveryService discoveryService;
+    private volatile @Nullable DiagralAuthenticationManager authManager;
+    private volatile @Nullable DiagralHttpClient diagralHttpClient;
+    private volatile @Nullable ScheduledFuture<?> pollingJob;
+    private volatile @Nullable ScheduledFuture<?> authRetryJob;
+    private volatile @Nullable Cached<DiagralSystemConfiguration> cachedConfiguration;
+    private volatile @Nullable DiagralSystemDetails cachedDetails;
+    private volatile @Nullable Cached<DiagralSystemStatus> cachedSystemStatus;
+    private final AtomicInteger consecutivePollFailures = new AtomicInteger();
+
+    /**
+     * Serialises {@link #poll()}.
+     *
+     * <p>
+     * Polling runs both on the scheduled interval and off-cycle, submitted by every command method so the
+     * UI re-syncs promptly - so two polls really can overlap. Unguarded, they raced on the caches above
+     * and duplicated every HTTP call. A lock rather than a "skip if busy" flag on purpose: a
+     * command-triggered re-poll exists precisely to reflect a state change that just happened, so
+     * dropping it would reintroduce exactly the stale-UI problem it was added to fix. Waiting briefly on
+     * a scheduler thread is the cheaper trade.
+     * </p>
+     */
+    private final ReentrantLock pollLock = new ReentrantLock();
+
+    /**
+     * Set once {@link #dispose()} has run, so work already scheduled - in particular the
+     * self-rescheduling {@link #attemptInitialAuthentication(DiagralBridgeConfiguration)} retry - stops
+     * instead of running on, and possibly restarting polling, after this handler is gone.
+     */
+    private volatile boolean disposed;
 
     /**
      * Best-effort, locally-tracked set of group IDs believed active while the real API's {@code /status}
@@ -160,7 +235,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * made outside this binding (e.g. the official e-ONE app) until the next poll lands on a named mode.
      * </p>
      */
-    private @Nullable String lastKnownMode;
+    private volatile @Nullable String lastKnownMode;
 
     /**
      * Constructs a new bridge handler.
@@ -186,6 +261,14 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     @Override
     public void initialize() {
         logger.debug("Initializing Diagral bridge handler");
+
+        // Reset the per-lifecycle state. This matters because the framework reuses the handler instance:
+        // BaseThingHandler.thingUpdated() calls dispose() then initialize() on this same object whenever
+        // the thing's configuration is edited, so leaving `disposed` set from the previous cycle would
+        // make attemptInitialAuthentication() and poll() return immediately forever, and the bridge would
+        // never come back online after a config change.
+        disposed = false;
+        consecutivePollFailures.set(0);
 
         DiagralBridgeConfiguration config = getConfigAs(DiagralBridgeConfiguration.class);
 
@@ -222,13 +305,31 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @param config the validated bridge configuration (carries the retry/poll interval)
      */
     private void attemptInitialAuthentication(DiagralBridgeConfiguration config) {
+        if (disposed) {
+            return;
+        }
+
         try {
             authenticate();
+            if (disposed) {
+                // dispose() ran while authentication was in flight; don't start polling a dead handler.
+                return;
+            }
             startPolling(config.refreshInterval);
         } catch (DiagralException e) {
+            if (disposed) {
+                return;
+            }
             logger.warn("Initial authentication failed, will retry in {}s: {}", config.refreshInterval, e.getMessage());
-            authRetryJob = scheduler.schedule(() -> attemptInitialAuthentication(config), config.refreshInterval,
-                    TimeUnit.SECONDS);
+            ScheduledFuture<?> retry = scheduler.schedule(() -> attemptInitialAuthentication(config),
+                    config.refreshInterval, TimeUnit.SECONDS);
+            authRetryJob = retry;
+            // Re-check after publishing the job: had dispose() run between the check above and here, it
+            // would have cancelled the previous job and missed this one, leaving it to retry forever on a
+            // disposed handler.
+            if (disposed) {
+                retry.cancel(false);
+            }
         }
     }
 
@@ -245,6 +346,10 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     @Override
     public void dispose() {
         logger.debug("Disposing Diagral bridge handler");
+
+        // Set before cancelling anything: this is what stops the self-rescheduling initial-authentication
+        // retry from queueing another attempt after the cancellation below has already run.
+        disposed = true;
 
         stopPolling();
 
@@ -359,6 +464,24 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * </p>
      */
     private void poll() {
+        if (disposed) {
+            return;
+        }
+
+        // Serialise against any other in-flight poll - see pollLock's Javadoc.
+        pollLock.lock();
+        try {
+            pollOnce();
+        } finally {
+            pollLock.unlock();
+        }
+    }
+
+    /**
+     * Performs one poll cycle. Only ever called by {@link #poll()}, which holds {@link #pollLock} for the
+     * duration, so this method can assume it is the only poll running.
+     */
+    private void pollOnce() {
         DiagralHttpClient client = diagralHttpClient;
         if (client == null) {
             logger.debug("Skipping poll - HTTP client not initialized");
@@ -369,7 +492,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // Get system status - always fresh, refreshing the short-lived cache used by getSystemStatus()
             DiagralSystemStatus status = fetchAndCacheSystemStatus(client);
             logger.trace("System status retrieved: {}", status.status);
-            consecutivePollFailures = 0;
+            consecutivePollFailures.set(0);
 
             // Ensure bridge stays online
             if (getThing().getStatus() != ThingStatus.ONLINE) {
@@ -393,11 +516,11 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // Don't go offline on an isolated failure - this API's transient flakiness usually self-heals
             // within 1-3 cycles - but a sustained outage shouldn't leave the bridge silently ONLINE
             // forever either, so flip OFFLINE once too many consecutive failures pile up.
-            consecutivePollFailures++;
-            if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
-                logger.warn("Bridge going OFFLINE after {} consecutive poll failures", consecutivePollFailures);
+            int failures = consecutivePollFailures.incrementAndGet();
+            if (failures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                logger.warn("Bridge going OFFLINE after {} consecutive poll failures", failures);
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
-                        consecutivePollFailures + " consecutive poll failures - last error: " + e.getMessage());
+                        failures + " consecutive poll failures - last error: " + e.getMessage());
             }
         }
     }
@@ -412,8 +535,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      */
     private DiagralSystemStatus fetchAndCacheSystemStatus(DiagralHttpClient client) throws DiagralException {
         DiagralSystemStatus status = client.getSystemStatus();
-        cachedSystemStatus = status;
-        cachedSystemStatusTimestamp = System.currentTimeMillis();
+        cachedSystemStatus = new Cached<>(status, System.currentTimeMillis());
         return status;
     }
 
@@ -422,7 +544,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * stay up to date on the polling interval, not only on a manual refresh command.
      *
      * <p>
-     * Re-stamps {@link #cachedSystemStatusTimestamp} to "now" immediately before each handler's {@link
+     * Re-stamps the cached status's timestamp to "now" immediately before each handler's {@link
      * DiagralRefreshableHandler#refreshStatus()} call (added 2026-09-04, see the entry in this bundle's
      * {@code CLAUDE.md} for the live-verified failure it fixes). This exists because every handler
      * independently calls {@link #getSystemStatus()}, which only skips a fresh network fetch while the
@@ -439,8 +561,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         for (Thing childThing : getThing().getThings()) {
             ThingHandler handler = childThing.getHandler();
             if (handler instanceof DiagralRefreshableHandler refreshableHandler) {
-                if (cachedSystemStatus != null) {
-                    cachedSystemStatusTimestamp = System.currentTimeMillis();
+                Cached<DiagralSystemStatus> snapshot = cachedSystemStatus;
+                if (snapshot != null) {
+                    cachedSystemStatus = new Cached<>(snapshot.value(), System.currentTimeMillis());
                 }
                 try {
                     refreshableHandler.refreshStatus();
@@ -527,9 +650,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * @return the system status, or null if not available
      */
     public @Nullable DiagralSystemStatus getSystemStatus() {
-        DiagralSystemStatus cached = cachedSystemStatus;
-        if (cached != null && System.currentTimeMillis() - cachedSystemStatusTimestamp < SYSTEM_STATUS_CACHE_TTL_MS) {
-            return cached;
+        Cached<DiagralSystemStatus> cached = cachedSystemStatus;
+        if (cached != null && cached.isFreshAt(System.currentTimeMillis(), SYSTEM_STATUS_CACHE_TTL_MS)) {
+            return cached.value();
         }
 
         DiagralHttpClient client = diagralHttpClient;
@@ -577,29 +700,42 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * Gets the system configuration (cached).
      *
      * <p>
-     * The configuration (device lists, groups, etc.) rarely changes, so it's fetched once and cached
-     * indefinitely - call {@link #refreshConfiguration()} to force a fresh fetch, which happens
-     * automatically after a successful (or possibly-successful) {@link #enableDevice}/{@link
-     * #disableDevice} call. This is what every thing handler's {@code refreshStatus()} reads its device
-     * data from.
+     * This is what every thing handler's {@code refreshStatus()} reads its device data from. Cached for
+     * {@link #CONFIGURATION_CACHE_TTL_MS} - see that constant for why the lifetime is bounded rather than
+     * indefinite, and why it is nonetheless much longer than the poll interval. The cache is also
+     * invalidated outright after a (possibly-successful) {@link #enableDevice}/{@link #disableDevice}
+     * call, and by {@link #refreshConfiguration()}.
      * </p>
      *
-     * @return the system configuration, or null if not available
+     * <p>
+     * If a refresh fails, the expired entry is served rather than {@code null}: slightly stale device
+     * data keeps every thing's channels populated, whereas {@code null} makes each handler skip its
+     * update entirely. A transient API failure - which this API produces routinely - should not blank the
+     * UI.
+     * </p>
+     *
+     * @return the system configuration, or null if none has ever been fetched successfully
      */
     public @Nullable DiagralSystemConfiguration getSystemConfiguration() {
-        if (cachedConfiguration != null) {
-            return cachedConfiguration;
+        Cached<DiagralSystemConfiguration> cached = cachedConfiguration;
+        if (cached != null && cached.isFreshAt(System.currentTimeMillis(), CONFIGURATION_CACHE_TTL_MS)) {
+            return cached.value();
         }
 
         DiagralHttpClient client = diagralHttpClient;
         if (client == null) {
-            return null;
+            return cached == null ? null : cached.value();
         }
 
         try {
-            cachedConfiguration = client.getSystemConfiguration();
-            return cachedConfiguration;
+            DiagralSystemConfiguration configuration = client.getSystemConfiguration();
+            cachedConfiguration = new Cached<>(configuration, System.currentTimeMillis());
+            return configuration;
         } catch (DiagralException e) {
+            if (cached != null) {
+                logger.debug("Failed to refresh system configuration, serving the previous one: {}", e.getMessage());
+                return cached.value();
+            }
             logger.warn("Failed to get system configuration: {}", e.getMessage());
             return null;
         }
@@ -956,8 +1092,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Forces a fresh fetch of the system configuration on the next call to {@link
-     * #getSystemConfiguration()}, discarding whatever is currently cached.
+     * Forces a fresh fetch of the system configuration, discarding whatever is currently cached rather
+     * than waiting for {@link #CONFIGURATION_CACHE_TTL_MS} to elapse.
      *
      * <p>
      * Invalidates the cache and immediately re-fetches (synchronously, on the calling thread) so the
@@ -991,30 +1127,33 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      */
     @Override
     public Collection<ConfigStatusMessage> getConfigStatus() {
-        diagralBridgeConfig = getConfigAs(DiagralBridgeConfiguration.class);
+        // A local, not a field: this is read-only, computed fresh on every call, and used nowhere else -
+        // holding it in shared mutable state would just be one more thing for another thread to observe
+        // half-written.
+        DiagralBridgeConfiguration config = getConfigAs(DiagralBridgeConfiguration.class);
         // Must be mutable - List.of() would throw UnsupportedOperationException on the very first add()
         // below, which is exactly the case (a genuinely missing field) this method exists to report.
         Collection<ConfigStatusMessage> messages = new ArrayList<>();
 
-        String username = diagralBridgeConfig.username;
+        String username = config.username;
         if (username == null || username.isEmpty()) {
             messages.add(ConfigStatusMessage.Builder.error(CONFIG_USERNAME).withMessageKeySuffix(USERNAME_MISSING)
                     .withArguments(CONFIG_USERNAME).build());
         }
 
-        String password = diagralBridgeConfig.password;
+        String password = config.password;
         if (password == null || password.isEmpty()) {
             messages.add(ConfigStatusMessage.Builder.error(CONFIG_PASSWORD).withMessageKeySuffix(PASSWORD_MISSING)
                     .withArguments(CONFIG_PASSWORD).build());
         }
 
-        String pincode = diagralBridgeConfig.pinCode;
+        String pincode = config.pinCode;
         if (pincode == null || pincode.isEmpty()) {
             messages.add(ConfigStatusMessage.Builder.error(CONFIG_PIN_CODE).withMessageKeySuffix(PINCODE_MISSING)
                     .withArguments(CONFIG_PIN_CODE).build());
         }
 
-        String serialid = diagralBridgeConfig.serialId;
+        String serialid = config.serialId;
         if (serialid == null || serialid.isEmpty()) {
             messages.add(ConfigStatusMessage.Builder.error(CONFIG_SERIAL_ID).withMessageKeySuffix(SERIALID_MISSING)
                     .withArguments(CONFIG_SERIAL_ID).build());
