@@ -193,6 +193,11 @@
 				<option value="PRESENCE">Presence</option>
 				<option value="PARTIAL1">Partial 1</option>
 				<option value="PARTIAL2">Partial 2</option>
+				<option value="TEMPO_1">Arming (Partial 1 / Presence)</option>
+				<option value="TEMPO_2">Arming (Partial 2)</option>
+				<option value="TEMPO_GROUP">Arming (Group)</option>
+				<option value="GROUP">Active (Group)</option>
+				<option value="LEARNING_MODE">Learning Mode (Installation)</option>
 			</options>
 		</state>
 	</channel-type>
