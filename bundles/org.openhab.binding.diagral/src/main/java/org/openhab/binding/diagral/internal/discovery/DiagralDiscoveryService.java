@@ -143,17 +143,31 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
             return;
         }
 
+        // The id derives from the box serial, which the API may omit or return too short (see
+        // DiagralAlarm#getId). Passing null - or a serial carrying a character ThingUID rejects - would
+        // throw here and abort the whole scan, taking every other device down with it. Skip this one
+        // result instead.
+        String alarmId = alarmSystem.getId();
+        if (alarmId == null) {
+            logger.debug("Skipping alarm system discovery - no usable id could be derived from the box serial");
+            return;
+        }
+
         ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-        ThingUID thingUID = new ThingUID(THING_TYPE_ALARM_SYSTEM, bridgeUID, alarmSystem.getId());
+        ThingUID thingUID = new ThingUID(THING_TYPE_ALARM_SYSTEM, bridgeUID, toUidSegment(alarmId));
 
         Map<String, Object> properties = new HashMap<>();
         properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
 
-        if (alarmSystem.name != null) {
-            properties.put(PROPERTY_ALARM_SYSTEM_NAME, alarmSystem.name);
+        String alarmName = alarmSystem.name;
+        if (alarmName != null) {
+            properties.put(PROPERTY_ALARM_SYSTEM_NAME, alarmName);
         }
-        if (alarmSystem.box != null && alarmSystem.box.serial != null) {
-            properties.put(CONFIG_SERIAL_ID, alarmSystem.box.serial);
+
+        DiagralAlarm.Device box = alarmSystem.box;
+        String boxSerial = box == null ? null : box.serial;
+        if (boxSerial != null) {
+            properties.put(CONFIG_SERIAL_ID, boxSerial);
         }
 
         DiagralSystemDetails alarmDetails = bridgeHandler.getSystemDetails();
@@ -176,7 +190,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         }
 
         // Build label
-        String label = alarmSystem.name != null ? alarmSystem.name + " (Diagral Alarm System)" : "Diagral Alarm System";
+        String label = alarmName != null ? alarmName + " (Diagral Alarm System)" : "Diagral Alarm System";
 
         thingDiscovered(DiscoveryResultBuilder.create(thingUID).withBridge(bridgeUID).withLabel(label)
                 .withProperties(properties).withRepresentationProperty(CONFIG_SERIAL_ID).build());
@@ -321,8 +335,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
             return;
         }
 
-        String deviceId = id.replaceAll("[^a-zA-Z0-9_]", "_");
-        ThingUID thingUID = new ThingUID(thingTypeUID, bridgeUID, deviceId);
+        ThingUID thingUID = new ThingUID(thingTypeUID, bridgeUID, toUidSegment(id));
 
         Map<String, Object> properties = new HashMap<>();
         properties.put(CONFIG_DEVICE_ID, id);
@@ -353,6 +366,22 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
                 .withProperties(properties).withRepresentationProperty(CONFIG_DEVICE_ID).build());
 
         logger.debug("Discovered {}: {} - {}", labelSuffix, thingUID, label);
+    }
+
+    /**
+     * Reduces an API-supplied identifier to characters {@link ThingUID} accepts.
+     *
+     * <p>
+     * {@code ThingUID} rejects a segment containing anything outside letters, digits and underscores,
+     * throwing {@code IllegalArgumentException} from its constructor - which, during a scan, would abort
+     * the whole thing. Every id that reaches a {@code ThingUID} goes through here.
+     * </p>
+     *
+     * @param id the raw identifier from the API
+     * @return the same identifier with every unacceptable character replaced by an underscore
+     */
+    private static String toUidSegment(String id) {
+        return id.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     /**

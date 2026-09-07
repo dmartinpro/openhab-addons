@@ -20,6 +20,7 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.DiagralConfiguration;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 import org.openhab.binding.diagral.internal.dto.DiagralDevice;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.core.library.types.OnOffType;
@@ -169,23 +170,19 @@ public abstract class DiagralSensorHandler extends DiagralBaseThingHandler {
     }
 
     /**
-     * Refreshes the sensor status from the bridge and updates all channels.
+     * Refreshes the sensor status from the shared snapshot and updates all channels.
+     *
+     * @param snapshot the system state to reflect
      */
     @Override
-    public void refreshStatus() {
+    public void refreshStatus(DiagralPollSnapshot snapshot) {
         String currentDeviceId = deviceId;
         if (currentDeviceId == null) {
             logger.debug("Cannot refresh status - device ID not set");
             return;
         }
 
-        DiagralBridgeHandler bridgeHandler = getBridgeHandler();
-        if (bridgeHandler == null) {
-            logger.debug("Cannot refresh status - bridge handler not available");
-            return;
-        }
-
-        DiagralSystemConfiguration config = bridgeHandler.getSystemConfiguration();
+        DiagralSystemConfiguration config = snapshot.configuration();
         if (config == null) {
             logger.debug("No system configuration available");
             return;
