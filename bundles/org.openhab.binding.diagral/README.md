@@ -8,11 +8,16 @@ The binding communicates with the Diagral cloud service using HMAC-SHA256 authen
 
 This binding supports the following thing types:
 
-- `bridge`: The Diagral Bridge - Represents the connection to the Diagral cloud API and handles authentication
-- `alarm-system`: The main alarm system control - Provides status monitoring and mode control (arm/disarm)
-- `motion-sensor`: Motion detection sensors - Reports motion detection status, enabled state, and battery level
-- `contact-sensor`: Contact/door sensors - Reports contact state (open/closed), enabled state, and battery level
-- `group`: Device groups - Allows controlling multiple devices together as a group
+- `bridge`: The Diagral Bridge — the connection to the Diagral cloud API; handles authentication and polling
+- `alarm-system`: The main alarm system — status monitoring, mode control (arm/disarm) and anomaly reporting
+- `motion-sensor`: Motion detection sensor — enabled state and low-battery indicator
+- `contact-sensor`: Contact/door sensor — enabled state and low-battery indicator
+- `siren`: Siren — enabled state and low-battery indicator
+- `keypad`: Keypad (the API's "commands" category) — enabled state and low-battery indicator
+- `plug`: Smart plug — enabled state and low-battery indicator
+- `transmitter`: Generic radio transmitter — read-only; the API has no enable/disable action for these
+- `camera`: Camera — inventory only; the API exposes no image or video access, and no enable/disable action
+- `group`: Device group (zone) — activate or deactivate a group of devices together
 
 ## Discovery
 
@@ -21,8 +26,8 @@ The binding supports automatic discovery of Diagral devices.
 Once you configure and initialize the Diagral Bridge with valid credentials, the binding will automatically discover:
 
 - The alarm system
-- All motion sensors
-- All contact sensors
+- All motion and contact sensors
+- All sirens, keypads, plugs, transmitters and cameras
 - All device groups
 
 Discovered devices will appear in the inbox and can be added with a single click.
@@ -91,6 +96,7 @@ If you need to manually configure one:
 | mode-control      | String | Read/Write | Control the alarm mode (OFF, FULL, PRESENCE, PARTIAL1, PARTIAL2); also reflects the current mode |
 | anomalies-present | Switch | Read Only  | Indicates if any anomalies are present in the system           |
 | anomaly-count     | Number | Read Only  | Number of active anomalies in the system                       |
+| central-low-battery | Switch | Read Only | ON when the central unit reports a main or backup power supply alert |
 
 #### `armed-status` values
 
@@ -128,6 +134,20 @@ them by itself, and there is no command that produces them.
 | contact       | Contact | Read Only  | Always `UNDEF` — the cloud API exposes no live open/closed state (see Known Limitations) |
 | enabled       | Switch  | Read/Write | Device enabled state (ON=enabled, OFF=disabled); sending a command enables/disables (un-inhibits/inhibits) the device |
 | low-battery   | Switch  | Read Only  | Low battery indicator (ON=low, OFF=normal)       |
+
+### Siren, Keypad and Plug Channels
+
+| Channel       | Type   | Read/Write | Description                                                  |
+|---------------|--------|------------|--------------------------------------------------------------|
+| enabled       | Switch | Read/Write | Device enabled state; sending a command enables/disables (un-inhibits/inhibits) it |
+| low-battery   | Switch | Read Only  | Low battery indicator (ON=low, OFF=normal)                   |
+
+### Transmitter and Camera Channels
+
+| Channel       | Type   | Read/Write | Description                                                  |
+|---------------|--------|------------|--------------------------------------------------------------|
+| enabled       | Switch | Read Only  | Device enabled state — read-only, the API has no enable/disable action for these types |
+| low-battery   | Switch | Read Only  | Low battery indicator (ON=low, OFF=normal)                   |
 
 ### Device Group Channels
 
@@ -237,7 +257,7 @@ sitemap diagral label="Diagral Alarm System" {
 - **Polling-based updates**: Status updates are retrieved by polling the API at the configured refresh interval (default 60 seconds). Real-time push notifications are not available.
 - **API key storage**: API keys are stored in memory only and are regenerated on each openHAB restart.
 - **Authentication requirements**: You must have a valid Diagral account with cloud access enabled for your system.
-- **Device support**: Initial implementation focuses on alarm system control, motion sensors, contact sensors, and device groups. Other device types (cameras with video streaming, sirens, switches) may be added in future versions.
+- **Device support**: Sensors, sirens, keypads, plugs, transmitters, cameras and device groups are all discovered and exposed. Cameras are inventory-only — the cloud API used by this binding provides no image or video access. Diagral's automatism devices ("rudes": shutters, gates, comfort relays) are not supported, because the API returns an empty list for them regardless of what is installed.
 - **Rate limiting**: The Diagral API may impose rate limits. When it responds with HTTP 429 (rate limited) or a 5xx server error, the binding automatically backs scheduled polling off, doubling the delay for each consecutive occurrence up to a 10-minute maximum, and resumes its normal cadence as soon as a poll succeeds. You will see a `WARN` line each time it backs off and an `INFO` line when it recovers. Commands you send (arming, disarming, toggling a zone) are never suppressed by this. If you see it happening often, increase the refresh interval.
 - **No live motion or contact state**: The Diagral cloud API used by this binding returns only device inventory, inhibit status and anomalies — it exposes no real-time detection state. The `motion` and `contact` channels therefore report `UNDEF` ("unknown") rather than a value.
 
@@ -259,7 +279,7 @@ sitemap diagral label="Diagral Alarm System" {
 
   This is expected and does not indicate a problem with your setup.
 
-- **The API's `activated_groups` field is never populated, under any status — arming/disarming goes through transitional status values while it settles**: The `armed-status` channel on the `alarm-system` thing normally shows one of `OFF`, `FULL`, `PRESENCE`, `PARTIAL1`, or `PARTIAL2` — but extensive live testing (2026-09-03, every mode and every zone) found that `/status`'s `activated_groups` list is **always empty**, even for a fully-settled named mode like `PRESENCE`. It cannot be used to tell which zone(s) are armed under any circumstance.
+- **The API's `activated_groups` field is unreliable except in one state — arming/disarming goes through transitional status values while it settles**: The `armed-status` channel on the `alarm-system` thing normally shows one of `OFF`, `FULL`, `PRESENCE`, `PARTIAL1`, or `PARTIAL2` — but extensive live testing (2026-09-03, every mode and every zone) found that `/status`'s `activated_groups` list is **empty for every named mode**, even a fully-settled one like `PRESENCE`. Later testing (2026-09-04) found one exception: once a directly-activated zone settles into the `GROUP` status, `activated_groups` **is** accurate, and the binding trusts it there. Everywhere else it cannot be used to tell which zones are armed.
 
   Arming or disarming also isn't instant: for up to a zone's `outputDelay` seconds (typically ~90s), `/status` reports a transitional value instead of the target mode - confirmed values are `TEMPO_1` (arming toward `PARTIAL1`/`PRESENCE`), `TEMPO_2` (toward `PARTIAL2`), and `TEMPO_GROUP` - which, surprisingly, is what `FULL` reports too, as well as directly activating one `group` thing's `active` channel outside any whole-system mode. This suggests `FULL` is implemented server-side as "activate every zone" rather than as its own distinct arming path. All of these, plus the settled `GROUP` and `LEARNING_MODE` states, are declared as labelled options on `armed-status` (see the channel table above), so none of them reach you as a raw string.
 

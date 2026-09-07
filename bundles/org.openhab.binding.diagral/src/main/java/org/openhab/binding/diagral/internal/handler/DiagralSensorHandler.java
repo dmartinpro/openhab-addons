@@ -56,7 +56,9 @@ import org.slf4j.LoggerFactory;
 @NonNullByDefault
 public abstract class DiagralSensorHandler extends DiagralBaseThingHandler {
 
-    private final Logger logger = LoggerFactory.getLogger(DiagralSensorHandler.class);
+    // getClass(), not the literal: this is a base class for sirens, keypads, plugs, cameras and
+    // transmitters, and binding the logger to DiagralSensorHandler attributed all their lines to it.
+    private final Logger logger = LoggerFactory.getLogger(getClass());
     private @Nullable String deviceId;
     private int deviceIndex = -1;
 

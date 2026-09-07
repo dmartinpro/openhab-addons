@@ -469,6 +469,47 @@ Pure refactors - no behaviour change intended, and the existing suite plus two n
 New tests: `DiagralHandlerFactoryTest` (the type→handler mapping had no coverage at all, which is the
 riskiest thing about a table-driven rewrite) and `DiagralArmedStatusOptionsTest` from C7.
 
+## Cleanup pass (2026-09-07): dead code, conventions, docs, missing tests
+
+Closes the remaining review items. No behaviour change except where noted.
+
+- **Dead code removed**: `refreshConfiguration()` (no callers), `DiagralDiscoveryService.bridgeUID`
+  (assigned, never read), two unused `DiagralCryptoUtil.hmacSha256` overloads (one of which had a
+  3-`String` signature easily confused with the real 2-arg one), the commented-out
+  `CHANNEL_BATTERY_LEVEL`, and 15 unused constants.
+
+  **The duplicated `"9012"` is resolved, with evidence.** `DEVICE_DIAG45ACK_CODE` (keyboard) and
+  `DEVICE_DIAG50AAX_CODE` (outdoor siren) both held `"9012"`. The live configuration shows `9012` is the
+  keypad (`"label":"Clavier entrée","refCode":"9012"`) and the outdoor siren is `900B`
+  (`"label":"Sirène extérieure","refCode":"900B"`), so the siren constant was simply wrong. Both were
+  unused, so both are gone - but do not reintroduce `"9012"` as a siren code.
+
+- **Conventions**:
+  - Thing property keys are camelCase, per the openHAB naming guideline. They were human strings with
+    spaces (`"Device Type"`, `"Is MJPEG Archive Video Supported"`). **Note**: things discovered before
+    this keep their old property keys until re-discovered - cosmetic only, nothing reads them.
+  - Core constants are used where they exist: `Thing.PROPERTY_VENDOR`, `Thing.PROPERTY_SERIAL_NUMBER`
+    (replacing a hardcoded `"serial"`), `Thing.PROPERTY_FIRMWARE_VERSION`. The bundle's own duplicate
+    `PROPERTY_VENDOR` is gone.
+  - `logger.error` → `logger.warn` for authentication and command failures. Both are expected conditions
+    on this API (wrong credential = user config problem; timed-out command = routine, and often applied
+    anyway), and the `ThingStatus` detail is what actually surfaces them.
+  - `DiagralSensorHandler`'s logger uses `getClass()`, so siren/keypad/plug/camera/transmitter lines are
+    attributed to the concrete handler instead of all reading as `DiagralSensorHandler`.
+  - `DiagralBridgeConfiguration.isValid()` is split into `hasCredentials()` and
+    `isRefreshIntervalValid()`. Folding both into one check made an out-of-range interval report itself
+    as "check username, password, serialId, and pinCode", sending the user to the wrong place.
+
+- **README** now lists all ten thing types, has channel tables for siren/keypad/plug/transmitter/camera,
+  documents `central-low-battery`, and corrects the "activated_groups is never populated" claim, which the
+  2026-09-04 `GROUP`-status finding disproved.
+
+- **Tests for the pre-existing logic the review flagged**, none of which had any: `isGroupActive` and
+  `groupsForMode` (all three derivation branches), `getDisplayedMode`, `getTotalCount`,
+  `buildGroupsPayload`, the product-type guard, the HTTP-500-on-success workaround in both directions, the
+  404-means-no-anomalies path, and `getThingTypeForDevice`. `getThingTypeForDevice` was widened from
+  private to package-private for this - the alternative was reflection, which the null analysis fights.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation

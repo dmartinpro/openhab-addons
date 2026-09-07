@@ -37,6 +37,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
+import org.openhab.binding.diagral.internal.dto.DiagralGroup;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
 import org.openhab.binding.diagral.internal.exception.DiagralApiException;
@@ -633,6 +634,147 @@ public class DiagralBridgeHandlerTest {
 
         invokePoll();
         verify(diagralHttpClient, times(1)).getSystemStatus();
+    }
+
+    /**
+     * Builds a configuration with the given per-mode group membership.
+     *
+     * @param presence group indices armed by PRESENCE
+     * @param partial1 group indices armed by PARTIAL1
+     * @param partial2 group indices armed by PARTIAL2
+     * @param allGroupIndices every group that exists, which is what FULL arms
+     * @return the configuration
+     */
+    private DiagralSystemConfiguration configurationWithGroups(List<Integer> presence, List<Integer> partial1,
+            List<Integer> partial2, int... allGroupIndices) {
+        DiagralSystemConfiguration config = new DiagralSystemConfiguration();
+        config.presenceGroup = presence;
+        config.partialGroup1 = partial1;
+        config.partialGroup2 = partial2;
+        List<DiagralGroup> groups = new ArrayList<>();
+        for (int index : allGroupIndices) {
+            DiagralGroup group = new DiagralGroup();
+            group.index = index;
+            groups.add(group);
+        }
+        config.groups = groups;
+        return config;
+    }
+
+    /**
+     * Builds a snapshot with the given status and configuration.
+     *
+     * @param status the system status value, or null for no status
+     * @param config the configuration, or null
+     * @param activatedGroups the activated_groups list to report, or null
+     * @return the snapshot
+     */
+    private DiagralPollSnapshot snapshot(@Nullable String status, @Nullable DiagralSystemConfiguration config,
+            @Nullable List<Integer> activatedGroups) {
+        DiagralSystemStatus systemStatus = null;
+        if (status != null) {
+            systemStatus = new DiagralSystemStatus();
+            systemStatus.status = status;
+            systemStatus.activatedGroups = activatedGroups;
+        }
+        return new DiagralPollSnapshot(systemStatus, config, () -> null);
+    }
+
+    /**
+     * While the system reports one of the five named modes, group membership is derived fresh from the
+     * configuration - self-correcting every poll however the mode was set, including from the e-ONE app.
+     */
+    @Test
+    public void namedModeDerivesGroupMembershipFromConfiguration() {
+        DiagralSystemConfiguration config = configurationWithGroups(List.of(1), List.of(1), List.of(2), 1, 2, 3);
+
+        DiagralPollSnapshot presence = snapshot("PRESENCE", config, List.of());
+        assertThat(handler.isGroupActive("1", presence), is(true));
+        assertThat(handler.isGroupActive("2", presence), is(false));
+        assertThat(handler.isGroupActive("3", presence), is(false));
+
+        DiagralPollSnapshot partial2 = snapshot("PARTIAL2", config, List.of());
+        assertThat(handler.isGroupActive("1", partial2), is(false));
+        assertThat(handler.isGroupActive("2", partial2), is(true));
+    }
+
+    /** FULL arms every group that exists, which the API expresses by listing none of them. */
+    @Test
+    public void fullModeArmsEveryGroup() {
+        DiagralPollSnapshot full = snapshot("FULL",
+                configurationWithGroups(List.of(1), List.of(1), List.of(2), 1, 2, 3), List.of());
+
+        for (String groupId : new String[] { "1", "2", "3" }) {
+            assertThat("group " + groupId + " should be armed by FULL", handler.isGroupActive(groupId, full), is(true));
+        }
+    }
+
+    /** OFF arms nothing, whatever the configuration says. */
+    @Test
+    public void offArmsNoGroup() {
+        DiagralPollSnapshot off = snapshot("OFF", configurationWithGroups(List.of(1), List.of(1), List.of(2), 1, 2, 3),
+                List.of());
+
+        assertThat(handler.isGroupActive("1", off), is(false));
+        assertThat(handler.isGroupActive("2", off), is(false));
+    }
+
+    /**
+     * The settled GROUP status is the one non-named state where activated_groups is reliable, so it is
+     * trusted directly - the 2026-09-04 finding.
+     */
+    @Test
+    public void settledGroupStatusTrustsActivatedGroups() {
+        DiagralPollSnapshot group = snapshot("GROUP", null, List.of(2));
+
+        assertThat(handler.isGroupActive("2", group), is(true));
+        assertThat(handler.isGroupActive("1", group), is(false));
+    }
+
+    /**
+     * A transitional status carries no per-group detail, so the answer falls back to the bridge's own
+     * record of the last group action it issued.
+     */
+    @Test
+    public void transitionalStatusFallsBackToLocallyTrackedGroups() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+        handler.activateGroup("3");
+
+        DiagralPollSnapshot tempo = snapshot("TEMPO_GROUP", null, List.of());
+        assertThat(handler.isGroupActive("3", tempo), is(true));
+        assertThat(handler.isGroupActive("1", tempo), is(false));
+    }
+
+    /** LEARNING_MODE is not an armed state and has no per-group detail; it uses the same fallback. */
+    @Test
+    public void learningModeUsesTheFallback() {
+        DiagralPollSnapshot learning = snapshot("LEARNING_MODE", null, List.of());
+
+        assertThat(handler.isGroupActive("1", learning), is(false));
+    }
+
+    /** mode-control shows the real mode while it is a named one. */
+    @Test
+    public void displayedModeIsTheNamedModeWhenThereIsOne() {
+        assertThat(handler.getDisplayedMode(snapshot("PARTIAL1", null, null)), is("PARTIAL1"));
+    }
+
+    /**
+     * During a transitional status, mode-control holds the last named mode rather than showing a raw
+     * TEMPO_* string, which is not one of the five selectable modes.
+     */
+    @Test
+    public void displayedModeHoldsTheLastNamedModeWhileTransitional() {
+        handler.getDisplayedMode(snapshot("PRESENCE", null, null));
+
+        assertThat(handler.getDisplayedMode(snapshot("TEMPO_1", null, null)), is("PRESENCE"));
+        assertThat(handler.getDisplayedMode(snapshot("GROUP", null, null)), is("PRESENCE"));
+    }
+
+    /** With nothing observed yet, there is no mode to display. */
+    @Test
+    public void displayedModeIsNullBeforeAnythingIsKnown() {
+        assertThat(handler.getDisplayedMode(snapshot(null, null, null)), is(nullValue()));
     }
 
     /**

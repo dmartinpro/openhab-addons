@@ -15,7 +15,6 @@ package org.openhab.binding.diagral.internal.util;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.Locale;
 
 import javax.crypto.Mac;
@@ -50,51 +49,6 @@ public class DiagralCryptoUtil {
      */
     private DiagralCryptoUtil() {
         // prevent instantiation
-    }
-
-    /**
-     * Generates the HMAC-SHA256 signature for a Diagral API request from its three components.
-     *
-     * <p>
-     * Convenience overload that builds the {@code "timestamp.serialId.apiKey"} data string before
-     * delegating to {@link #hmacSha256(String, String)}. Not currently called anywhere in this bundle -
-     * {@code DiagralAuthenticationManager.generateSignature()} builds the data string itself and calls
-     * the two-argument overload directly - but kept as a convenience for future callers.
-     * </p>
-     *
-     * @param timestamp the Unix timestamp (in seconds) to include in the signed data
-     * @param serialId the Diagral box serial ID to include in the signed data
-     * @param apiKey the API key to include in the signed data
-     * @param secret the secret key to sign with
-     * @return the resulting HMAC-SHA256 as an uppercase hexadecimal string
-     * @throws DiagralException if the HMAC calculation fails (see {@link #hmacSha256(String, String)})
-     */
-    public static String hmacSha256(String timestamp, String serialId, String apiKey, String secret)
-            throws DiagralException {
-        String data = String.format("%s.%s.%s", timestamp, serialId, apiKey);
-        return DiagralCryptoUtil.hmacSha256(data, secret);
-    }
-
-    /**
-     * Generates the HMAC-SHA256 signature for a Diagral API request, using the current time as the
-     * timestamp component.
-     *
-     * <p>
-     * Convenience overload equivalent to calling {@link #hmacSha256(String, String, String, String)}
-     * with {@code Instant.now().getEpochSecond()} as the timestamp. Not currently called anywhere in
-     * this bundle (see {@link #hmacSha256(String, String, String, String)}), but kept as a convenience
-     * for future callers.
-     * </p>
-     *
-     * @param serialId the Diagral box serial ID to include in the signed data
-     * @param apiKey the API key to include in the signed data
-     * @param secret the secret key to sign with
-     * @return the resulting HMAC-SHA256 as an uppercase hexadecimal string
-     * @throws DiagralException if the HMAC calculation fails (see {@link #hmacSha256(String, String)})
-     */
-    public static String hmacSha256(String serialId, String apiKey, String secret) throws DiagralException {
-        long timestamp = Instant.now().getEpochSecond();
-        return DiagralCryptoUtil.hmacSha256(String.valueOf(timestamp), serialId, apiKey, secret);
     }
 
     /**

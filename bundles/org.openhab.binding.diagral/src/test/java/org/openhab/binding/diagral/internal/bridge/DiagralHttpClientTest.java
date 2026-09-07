@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.api.ContentProvider;
 import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.http.HttpMethod;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -77,6 +79,9 @@ public class DiagralHttpClientTest {
     private final List<int[]> statuses = new ArrayList<>();
     private final List<String> bodies = new ArrayList<>();
 
+    /** The Jetty request mocks built so far, so a test can assert on the body one was given. */
+    private final List<Request> builtRequests = new ArrayList<>();
+
     /** Captures everything {@link DiagralHttpClient} logs, so S1's redaction can be asserted directly. */
     private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
     private @NonNullByDefault({}) Logger clientLogger;
@@ -100,6 +105,7 @@ public class DiagralHttpClientTest {
         // must not disclose credentials, so the tests below assert against a fully-open logger.
         clientLogger = (Logger) LoggerFactory.getLogger(DiagralHttpClient.class);
         clientLogger.setLevel(Level.TRACE);
+        builtRequests.clear();
         logAppender.start();
         clientLogger.addAppender(logAppender);
 
@@ -111,6 +117,7 @@ public class DiagralHttpClientTest {
             Request request = mock(Request.class);
             int index = requests.size();
             requests.add(new RecordedRequest("?", url));
+            builtRequests.add(request);
 
             when(request.method(any(HttpMethod.class))).thenAnswer(methodCall -> {
                 requests.set(index, new RecordedRequest(methodCall.getArgument(0).toString(), url));
@@ -147,6 +154,22 @@ public class DiagralHttpClientTest {
      */
     private String capturedLog() {
         return logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * Reads a Jetty content provider back into the string it will send.
+     *
+     * @param provider the provider the client attached to the request
+     * @return the body as UTF-8 text
+     */
+    private static String readBody(ContentProvider provider) {
+        StringBuilder body = new StringBuilder();
+        for (java.nio.ByteBuffer buffer : provider) {
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            body.append(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return body.toString();
     }
 
     /**
@@ -390,6 +413,76 @@ public class DiagralHttpClientTest {
         String log = capturedLog();
         assertThat(log, not(containsString("abcdefghij0123456789")));
         assertThat(log, containsString("...6789"));
+    }
+
+    /**
+     * The activate/disable group endpoints need {@code {"groups":[<int>]}}; the earlier
+     * {@code {"group_id":"<string>"}} shape drew a 422 from the real API.
+     */
+    @Test
+    public void groupCommandsSendTheArrayPayloadTheApiRequires() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.OK_200, "{}");
+
+        client.activateGroup("3");
+
+        Request request = builtRequests.get(0);
+        ArgumentCaptor<ContentProvider> body = ArgumentCaptor.forClass(ContentProvider.class);
+        verify(request).content(body.capture());
+        assertThat(readBody(body.getValue()), is("{\"groups\":[3]}"));
+    }
+
+    /** A non-numeric group id is rejected locally rather than sent as a malformed request. */
+    @Test
+    public void nonNumericGroupIdIsRejectedBeforeSending() {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+
+        assertThrows(DiagralApiException.class, () -> client.activateGroup("kitchen"));
+        assertThat(requests, is(empty()));
+    }
+
+    /** An unknown product type is rejected locally - the API has no endpoint for it. */
+    @Test
+    public void unknownProductTypeIsRejectedBeforeSending() {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+
+        assertThrows(DiagralApiException.class, () -> client.enableProduct("DOORBELL", 1));
+        assertThat(requests, is(empty()));
+    }
+
+    /**
+     * The documented HTTP-500-on-success quirk: the endpoint returns 500 even when it applied the action,
+     * so the client verifies the device's real inhibited state via /anomalies and treats a match as
+     * success.
+     */
+    @Test
+    public void http500IsTreatedAsSuccessWhenTheStateMatches() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.INTERNAL_SERVER_ERROR_500, "");
+        // Device 1 reports no inhibited anomaly, which is what "enable" was asking for.
+        enqueue(HttpStatus.OK_200, "{\"sensors\":[{\"index\":1,\"anomaly_names\":[]}]}");
+
+        client.enableProduct("SENSOR", 1);
+    }
+
+    /** ...but a 500 whose verified state contradicts the request still fails. */
+    @Test
+    public void http500StillFailsWhenTheStateDoesNotMatch() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.INTERNAL_SERVER_ERROR_500, "");
+        // Device 1 is still inhibited, so "enable" demonstrably did not take effect.
+        enqueue(HttpStatus.OK_200, "{\"sensors\":[{\"index\":1,\"anomaly_names\":[{\"name\":\"inhibited\"}]}]}");
+
+        assertThrows(DiagralApiException.class, () -> client.enableProduct("SENSOR", 1));
+    }
+
+    /** A 404 from /anomalies means "nothing is wrong", not a failure. */
+    @Test
+    public void anomaliesNotFoundMeansNoAnomalies() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.NOT_FOUND_404, "");
+
+        assertThat(client.getAnomalies().getTotalCount(), is(0));
     }
 
     /**
