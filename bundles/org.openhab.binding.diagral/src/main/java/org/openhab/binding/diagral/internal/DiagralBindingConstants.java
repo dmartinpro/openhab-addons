@@ -61,7 +61,6 @@ public class DiagralBindingConstants {
     public static final String CHANNEL_MOTION = "motion";
     public static final String CHANNEL_CONTACT = "contact";
     public static final String CHANNEL_ENABLED = "enabled";
-    // public static final String CHANNEL_BATTERY_LEVEL = "battery-level";
     public static final String CHANNEL_LOW_BATTERY = "low-battery";
 
     // List of all Channel IDs - Group
@@ -210,7 +209,6 @@ public class DiagralBindingConstants {
     public static final String CONFIG_PASSWORD = "password";
     public static final String CONFIG_SERIAL_ID = "serialId";
     public static final String CONFIG_PIN_CODE = "pinCode";
-    public static final String CONFIG_REFRESH_INTERVAL = "refreshInterval";
     public static final String CONFIG_DEVICE_ID = "deviceId";
     public static final String CONFIG_DEVICE_INDEX = "deviceIndex";
     public static final String CONFIG_GROUP_ID = "groupId";
@@ -218,29 +216,27 @@ public class DiagralBindingConstants {
     // Thing Properties
     public static final String PROPERTY_DEVICE_TYPE = "deviceType";
     public static final String PROPERTY_DEVICE_SUBTYPE = "deviceSubtype";
-    public static final String PROPERTY_DEVICE_ID = "deviceId";
     public static final String PROPERTY_GROUP_ID = "groupId";
     public static final String PROPERTY_GROUP_INPUT_DELAY = "inputDelay";
     public static final String PROPERTY_GROUP_OUTPUT_DELAY = "outputDelay";
     public static final String PROPERTY_GROUP_MODES = "armModes";
-    public static final String PROPERTY_VENDOR = "vendor";
 
     // Vendor constant
     public static final String VENDOR_DIAGRAL = "Diagral";
     public static final String VENDOR_PARAM = "DIAGRAL";
 
-    // Alarm Details Properties
-    public static final String PROPERTY_ALARM_SYSTEM_NAME = "Name";
-    public static final String PROPERTY_ALARM_DEVICE_TYPE = "Device Type";
-    public static final String PROPERTY_ALARM_FIRMWARE_VERSION = "Firmware Version";
-    public static final String PROPERTY_ALARM_IP_ADDRESS = "IP Address";
-    public static final String PROPERTY_ALARM_IPODA_VERSION = "Ipoda Version";
-    public static final String PROPERTY_ALARM_MODE = "Mode";
-    public static final String PROPERTY_ALARM_IS_ALARM_FILE_PRESENT = "Is Alarm File Present";
-    public static final String PROPERTY_ALARM_IS_MJPEG_ARCHIVE_VIDEO_SUPPORTED = "Is MJPEG Archive Video Supported";
-    public static final String PROPERTY_ALARM_IS_MASS_STORAGE_PRESENT = "Is Mass Storage Present";
-    public static final String PROPERTY_ALARM_IS_REMOTE_STARTUP_SHUTDOWN_ALLOWED = "Is Remote Startup Shutdown Allowed";
-    public static final String PROPERTY_ALARM_IS_VIDEO_PASSWORD_PROTECTED = "Is Video Password Protected";
+    // Alarm Details Properties. camelCase per the openHAB naming guideline for thing properties; the
+    // firmware version is not listed here because it uses core's Thing.PROPERTY_FIRMWARE_VERSION.
+    public static final String PROPERTY_ALARM_SYSTEM_NAME = "name";
+    public static final String PROPERTY_ALARM_DEVICE_TYPE = "deviceType";
+    public static final String PROPERTY_ALARM_IP_ADDRESS = "ipAddress";
+    public static final String PROPERTY_ALARM_IPODA_VERSION = "ipodaVersion";
+    public static final String PROPERTY_ALARM_MODE = "mode";
+    public static final String PROPERTY_ALARM_IS_ALARM_FILE_PRESENT = "isAlarmFilePresent";
+    public static final String PROPERTY_ALARM_IS_MJPEG_ARCHIVE_VIDEO_SUPPORTED = "isMjpegArchiveVideoSupported";
+    public static final String PROPERTY_ALARM_IS_MASS_STORAGE_PRESENT = "isMassStoragePresent";
+    public static final String PROPERTY_ALARM_IS_REMOTE_STARTUP_SHUTDOWN_ALLOWED = "isRemoteStartupShutdownAllowed";
+    public static final String PROPERTY_ALARM_IS_VIDEO_PASSWORD_PROTECTED = "isVideoPasswordProtected";
 
     // Config status messages
     public static final String USERNAME_MISSING = "missing-username-configuration";
@@ -250,28 +246,15 @@ public class DiagralBindingConstants {
 
     // Device types
     public static final String DEVICE_SENSOR_TYPE = "2";
-    public static final String DEVICE_KEYBOARD_TYPE = "3";
-    public static final String DEVICE_SIREN_TYPE = "4";
-    public static final String DEVICE_TRANSMITTER_TYPE = "5";
 
     // Device codes
-    public static final String DEVICE_DIAG45ACK_CODE = "9012"; // keyboard
-    public static final String DEVICE_TRANSMITTER5_CODE = "9037"; // unknown
-    public static final String DEVICE_TRANSMITTER9_CODE = "9031"; // unknown
     public static final String DEVICE_DIAG30APK_CODE = "9057"; // Détecteur d'ouverture miniature
-    public static final String DEVICE_DIAG50AAX_CODE = "9012"; // outdoor siren
     public static final String DEVICE_DIAG20AVK_CODE = "9000"; // capteur volumetrique standard
     public static final String DEVICE_DIAG21AVK_CODE = "9001"; // capteur volumetrique compatible animaux
     public static final String DEVICE_DIAG36APX_CODE = "9013"; // capteur volumetrique exterieur compatibles animaux
 
     // Device anomalies types
-    public static final String DEVICE_ANOMALY_RADIO_ALERT = "radioAlert";
     public static final String DEVICE_ANOMALY_POWER_SUPPLY_ALERT = "powerSupplyAlert";
-    public static final String DEVICE_ANOMALY_AUTOPROTECTION_MECHANICAL_ALERT = "autoprotectionMechanicalAlert";
-    public static final String DEVICE_ANOMALY_LOOP_ALERT = "loopAlert";
-    public static final String DEVICE_ANOMALY_MASK_ALERT = "maskAlert";
-    public static final String DEVICE_ANOMALY_SENSOR_ALERT = "sensorAlert";
-    public static final String DEVICE_ANOMALY_MEDIA_GSM_ALERT = "mediaGSMAlert";
     public static final String DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT = "mainPowerSupplyAlert";
     public static final String DEVICE_ANOMALY_SECOND_POWERSUPPLY_ALERT = "secondaryPowerSupplyAlert";
 

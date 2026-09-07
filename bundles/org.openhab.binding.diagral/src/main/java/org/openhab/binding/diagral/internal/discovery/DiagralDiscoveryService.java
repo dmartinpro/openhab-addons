@@ -31,6 +31,7 @@ import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemDetails;
 import org.openhab.core.config.discovery.AbstractThingHandlerDiscoveryService;
 import org.openhab.core.config.discovery.DiscoveryResultBuilder;
+import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.ThingUID;
 import org.osgi.service.component.annotations.Component;
@@ -69,8 +70,6 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
     private final Logger logger = LoggerFactory.getLogger(DiagralDiscoveryService.class);
 
     private static final int DISCOVERY_TIMEOUT_SECONDS = 30;
-
-    private @Nullable ThingUID bridgeUID;
 
     /**
      * Creates a new DiagralDiscoveryService.
@@ -161,7 +160,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         ThingUID thingUID = new ThingUID(THING_TYPE_ALARM_SYSTEM, bridgeUID, toUidSegment(alarmId));
 
         Map<String, Object> properties = new HashMap<>();
-        properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
+        properties.put(Thing.PROPERTY_VENDOR, VENDOR_DIAGRAL);
 
         String alarmName = alarmSystem.name;
         if (alarmName != null) {
@@ -172,12 +171,13 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         String boxSerial = box == null ? null : box.serial;
         if (boxSerial != null) {
             properties.put(CONFIG_SERIAL_ID, boxSerial);
+            properties.put(Thing.PROPERTY_SERIAL_NUMBER, boxSerial);
         }
 
         DiagralSystemDetails alarmDetails = bridgeHandler.getSystemDetails();
         if (alarmDetails != null) {
             properties.put(PROPERTY_ALARM_DEVICE_TYPE, getValueOrDefault(alarmDetails.deviceType, ""));
-            properties.put(PROPERTY_ALARM_FIRMWARE_VERSION, getValueOrDefault(alarmDetails.firmwareVersion, ""));
+            properties.put(Thing.PROPERTY_FIRMWARE_VERSION, getValueOrDefault(alarmDetails.firmwareVersion, ""));
             properties.put(PROPERTY_ALARM_IP_ADDRESS, getValueOrDefault(alarmDetails.ipAddress, ""));
             properties.put(PROPERTY_ALARM_IPODA_VERSION, getValueOrDefault(alarmDetails.ipodaVersion, ""));
             properties.put(PROPERTY_ALARM_MODE, getValueOrDefault(alarmDetails.mode, ""));
@@ -315,7 +315,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
 
         Map<String, Object> properties = new HashMap<>();
         properties.put(CONFIG_DEVICE_ID, id);
-        properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
+        properties.put(Thing.PROPERTY_VENDOR, VENDOR_DIAGRAL);
 
         Integer deviceIndex = device.deviceIndex;
         if (deviceIndex != null) {
@@ -332,7 +332,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         }
         String serial = device.serial;
         if (serial != null) {
-            properties.put("serial", serial);
+            properties.put(Thing.PROPERTY_SERIAL_NUMBER, serial);
         }
 
         String label = device.name != null && !device.name.isEmpty() ? device.name + " (" + labelSuffix + ")"
@@ -380,7 +380,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
 
             Map<String, Object> properties = new HashMap<>();
             properties.put(CONFIG_GROUP_ID, groupId);
-            properties.put(PROPERTY_VENDOR, VENDOR_DIAGRAL);
+            properties.put(Thing.PROPERTY_VENDOR, VENDOR_DIAGRAL);
             properties.put(PROPERTY_GROUP_ID, groupId);
             properties.put(PROPERTY_GROUP_INPUT_DELAY, group.inputDelay);
             properties.put(PROPERTY_GROUP_OUTPUT_DELAY, group.outputDelay);
@@ -444,10 +444,15 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
      * so they don't need this per-device classification.
      * </p>
      *
+     * <p>
+     * Package-private rather than private so {@code DiagralDeviceClassificationTest} can exercise it
+     * directly: this decides which handler - and therefore which channels - a discovered device gets.
+     * </p>
+     *
      * @param device the device
      * @return the thing type UID, or null if the device's type/refCode combination isn't recognized
      */
-    private static @Nullable ThingTypeUID getThingTypeForDevice(DiagralDevice device) {
+    static @Nullable ThingTypeUID getThingTypeForDevice(DiagralDevice device) {
         String type = device.type;
         String refCode = device.refCode;
 
@@ -475,13 +480,12 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
     }
 
     /**
-     * Records the bridge's thing UID and registers this service as the bridge's discovery listener.
+     * Registers this service as the bridge's discovery listener.
      *
      * @see DiagralBridgeHandler#registerDiscoveryListener(DiagralDiscoveryService)
      */
     @Override
     public void initialize() {
-        bridgeUID = thingHandler.getThing().getUID();
         thingHandler.registerDiscoveryListener(this);
         super.initialize();
     }

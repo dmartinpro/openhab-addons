@@ -29,6 +29,12 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 @NonNullByDefault
 public class DiagralBridgeConfiguration {
 
+    /** Lowest accepted poll interval in seconds, matching the {@code min} in {@code config.xml}. */
+    public static final int MIN_REFRESH_INTERVAL_SECONDS = 10;
+
+    /** Highest accepted poll interval in seconds, matching the {@code max} in {@code config.xml}. */
+    public static final int MAX_REFRESH_INTERVAL_SECONDS = 300;
+
     /**
      * Username (email) for Diagral account
      */
@@ -55,12 +61,28 @@ public class DiagralBridgeConfiguration {
     public int refreshInterval = 60;
 
     /**
-     * Validates the configuration
+     * Reports whether every required credential field is present.
      *
-     * @return true if configuration is valid, false otherwise
+     * <p>
+     * Deliberately separate from {@link #isRefreshIntervalValid()}: folding both into one check made an
+     * out-of-range interval report itself as "check username, password, serialId, and pinCode", which
+     * sends the user looking in the wrong place. {@code config.xml} constrains the interval in the UI,
+     * but a textual {@code .things} file can still set anything.
+     * </p>
+     *
+     * @return true if all four credential fields are non-empty
      */
-    public boolean isValid() {
-        return !username.isEmpty() && !password.isEmpty() && !serialId.isEmpty() && !pinCode.isEmpty()
-                && refreshInterval >= 10 && refreshInterval <= 300;
+    public boolean hasCredentials() {
+        return !username.isEmpty() && !password.isEmpty() && !serialId.isEmpty() && !pinCode.isEmpty();
+    }
+
+    /**
+     * Reports whether the poll interval is within the range {@code config.xml} declares.
+     *
+     * @return true if {@link #refreshInterval} is between {@value #MIN_REFRESH_INTERVAL_SECONDS} and
+     *         {@value #MAX_REFRESH_INTERVAL_SECONDS} seconds inclusive
+     */
+    public boolean isRefreshIntervalValid() {
+        return refreshInterval >= MIN_REFRESH_INTERVAL_SECONDS && refreshInterval <= MAX_REFRESH_INTERVAL_SECONDS;
     }
 }
