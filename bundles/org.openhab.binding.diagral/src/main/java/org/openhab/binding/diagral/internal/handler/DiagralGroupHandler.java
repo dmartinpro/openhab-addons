@@ -20,13 +20,10 @@ import org.openhab.binding.diagral.internal.DiagralConfiguration;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.StringType;
-import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
-import org.openhab.core.thing.binding.BaseThingHandler;
-import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.types.Command;
 import org.openhab.core.types.RefreshType;
 import org.slf4j.Logger;
@@ -52,7 +49,7 @@ import org.slf4j.LoggerFactory;
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefreshableHandler {
+public class DiagralGroupHandler extends DiagralBaseThingHandler {
 
     private final Logger logger = LoggerFactory.getLogger(DiagralGroupHandler.class);
     private @Nullable String groupId;
@@ -83,24 +80,14 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
 
         this.groupId = config.groupId;
 
-        // Check if bridge is available
-        Bridge bridge = getBridge();
-        if (bridge == null) {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR, "No bridge configured");
+        if (!goOnlineIfBridgeAvailable()) {
             return;
         }
 
-        // Check if bridge is online
-        if (bridge.getStatus() != ThingStatus.ONLINE) {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
-            return;
-        }
-
-        updateStatus(ThingStatus.ONLINE);
         logger.debug("Diagral group handler initialized for group: {}", groupId);
 
-        // Initial status refresh
-        refreshStatus();
+        // Off-thread: refreshStatus() reaches the cloud API, and initialize() must return promptly.
+        refreshStatusAsync();
     }
 
     /**
@@ -113,7 +100,7 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         if (command instanceof RefreshType) {
-            refreshStatus();
+            refreshStatusAsync();
             return;
         }
 
@@ -190,40 +177,5 @@ public class DiagralGroupHandler extends BaseThingHandler implements DiagralRefr
 
         updateState(CHANNEL_GROUP_ACTIVE, OnOffType.from(isActive));
         updateState(CHANNEL_GROUP_STATUS, new StringType(isActive ? "Active" : "Inactive"));
-    }
-
-    /**
-     * Gets the bridge handler.
-     *
-     * @return the bridge handler, or null if not available
-     */
-    private @Nullable DiagralBridgeHandler getBridgeHandler() {
-        Bridge bridge = getBridge();
-        if (bridge == null) {
-            return null;
-        }
-
-        ThingHandler handler = bridge.getHandler();
-        if (handler instanceof DiagralBridgeHandler bridgeHandler) {
-            return bridgeHandler;
-        }
-
-        return null;
-    }
-
-    /**
-     * Mirrors this thing's status to the bridge's status: goes {@code ONLINE} (and refreshes) when the
-     * bridge comes online, goes {@code OFFLINE} otherwise.
-     *
-     * @param bridgeStatusInfo the bridge's new status
-     */
-    @Override
-    public void bridgeStatusChanged(org.openhab.core.thing.ThingStatusInfo bridgeStatusInfo) {
-        if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE) {
-            updateStatus(ThingStatus.ONLINE);
-            refreshStatus();
-        } else {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
-        }
     }
 }
