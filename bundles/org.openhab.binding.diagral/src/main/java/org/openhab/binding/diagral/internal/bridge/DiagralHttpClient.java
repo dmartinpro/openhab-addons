@@ -330,15 +330,7 @@ public class DiagralHttpClient {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_STATUS;
         String responseBody = executeGet(endpoint, true);
 
-        try {
-            DiagralSystemStatus status = gson.fromJson(responseBody, DiagralSystemStatus.class);
-            if (status == null) {
-                throw new DiagralApiException("Invalid system status response", HttpStatus.OK_200);
-            }
-            return status;
-        } catch (JsonSyntaxException e) {
-            throw new DiagralApiException("Failed to parse system status response", HttpStatus.OK_200, e);
-        }
+        return parse(responseBody, DiagralSystemStatus.class, "system status");
     }
 
     /**
@@ -351,15 +343,7 @@ public class DiagralHttpClient {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_CONFIGURATIONS;
         String responseBody = executeGet(endpoint, false);
 
-        try {
-            DiagralSystemConfiguration config = gson.fromJson(responseBody, DiagralSystemConfiguration.class);
-            if (config == null) {
-                throw new DiagralApiException("Invalid system configuration response", HttpStatus.OK_200);
-            }
-            return config;
-        } catch (JsonSyntaxException e) {
-            throw new DiagralApiException("Failed to parse system configuration response", HttpStatus.OK_200, e);
-        }
+        return parse(responseBody, DiagralSystemConfiguration.class, "system configuration");
     }
 
     /**
@@ -372,15 +356,38 @@ public class DiagralHttpClient {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId();
         String responseBody = executeGet(endpoint, true);
 
+        return parse(responseBody, DiagralSystemDetails.class, "system details");
+    }
+
+    /**
+     * Deserialises a response body into a DTO, turning both an unparseable body and a {@code null} result
+     * into the same typed failure.
+     *
+     * <p>
+     * Gson returns {@code null} for a body that is literally {@code "null"} or empty, which is not an
+     * exception but is equally unusable - so both cases become a {@link DiagralApiException}. The status
+     * code is {@code 200} because by this point the request itself succeeded; what failed is the payload.
+     * </p>
+     *
+     * @param <T> the DTO type
+     * @param responseBody the raw response body
+     * @param type the DTO class to deserialise into
+     * @param description a short human-readable name for the payload, used in the failure message
+     * @return the parsed DTO, never null
+     * @throws DiagralApiException if the body cannot be parsed, or parses to null
+     */
+    private <T> T parse(String responseBody, Class<T> type, String description) throws DiagralApiException {
+        T parsed;
         try {
-            DiagralSystemDetails details = gson.fromJson(responseBody, DiagralSystemDetails.class);
-            if (details == null) {
-                throw new DiagralApiException("Invalid system details response", HttpStatus.OK_200);
-            }
-            return details;
+            parsed = gson.fromJson(responseBody, type);
         } catch (JsonSyntaxException e) {
-            throw new DiagralApiException("Failed to parse system details response", HttpStatus.OK_200, e);
+            throw new DiagralApiException("Failed to parse " + description + " response", HttpStatus.OK_200, e);
         }
+
+        if (parsed == null) {
+            throw new DiagralApiException("Invalid " + description + " response", HttpStatus.OK_200);
+        }
+        return parsed;
     }
 
     /**
@@ -402,6 +409,8 @@ public class DiagralHttpClient {
             throw e;
         }
 
+        // Deliberately not parse(): unlike the others, a null result here means "nothing is wrong with
+        // the system", which is a valid answer rather than an unusable payload.
         try {
             DiagralAnomalies anomalies = gson.fromJson(responseBody, DiagralAnomalies.class);
             return anomalies != null ? anomalies : new DiagralAnomalies();

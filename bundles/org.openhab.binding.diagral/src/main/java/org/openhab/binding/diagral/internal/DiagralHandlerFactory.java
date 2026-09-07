@@ -14,7 +14,11 @@ package org.openhab.binding.diagral.internal;
 
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -65,9 +69,33 @@ import org.osgi.service.component.annotations.Reference;
 @Component(configurationPid = "binding.diagral", service = ThingHandlerFactory.class)
 public class DiagralHandlerFactory extends BaseThingHandlerFactory {
 
-    private static final Set<ThingTypeUID> SUPPORTED_THING_TYPES_UIDS = Set.of(THING_TYPE_BRIDGE,
-            THING_TYPE_ALARM_SYSTEM, THING_TYPE_MOTION_SENSOR, THING_TYPE_CONTACT_SENSOR, THING_TYPE_GROUP,
-            THING_TYPE_SIREN, THING_TYPE_KEYPAD, THING_TYPE_PLUG, THING_TYPE_TRANSMITTER, THING_TYPE_CAMERA);
+    /**
+     * Maps each child thing type to its handler's constructor.
+     *
+     * <p>
+     * The bridge is deliberately absent: it is the one type whose handler needs a collaborator beyond the
+     * {@link Thing} itself (the shared HTTP client), so it is constructed explicitly in
+     * {@link #createHandler(Thing)} rather than bent into this shape.
+     * </p>
+     */
+    private static final Map<ThingTypeUID, Function<Thing, ThingHandler>> CHILD_HANDLER_FACTORIES = Map.of(
+            THING_TYPE_ALARM_SYSTEM, DiagralSystemHandler::new, //
+            THING_TYPE_MOTION_SENSOR, DiagralMotionSensorHandler::new, //
+            THING_TYPE_CONTACT_SENSOR, DiagralContactSensorHandler::new, //
+            THING_TYPE_GROUP, DiagralGroupHandler::new, //
+            THING_TYPE_SIREN, DiagralSirenHandler::new, //
+            THING_TYPE_KEYPAD, DiagralKeypadHandler::new, //
+            THING_TYPE_PLUG, DiagralPlugHandler::new, //
+            THING_TYPE_TRANSMITTER, DiagralTransmitterHandler::new, //
+            THING_TYPE_CAMERA, DiagralCameraHandler::new);
+
+    /**
+     * Every thing type this binding supports - derived from {@link #CHILD_HANDLER_FACTORIES} rather than
+     * listed again, so the two cannot disagree about what is supported.
+     */
+    private static final Set<ThingTypeUID> SUPPORTED_THING_TYPES_UIDS = Stream
+            .concat(Stream.of(THING_TYPE_BRIDGE), CHILD_HANDLER_FACTORIES.keySet().stream())
+            .collect(Collectors.toUnmodifiableSet());
 
     private final HttpClient httpClient;
 
@@ -96,9 +124,8 @@ public class DiagralHandlerFactory extends BaseThingHandlerFactory {
      * Creates the handler instance for a given thing, based on its thing type.
      *
      * <p>
-     * This is the single place that maps a {@link ThingTypeUID} to its concrete handler class - add a
-     * new {@code else if} branch here (and to {@link #SUPPORTED_THING_TYPES_UIDS}) when introducing a
-     * new thing type.
+     * Adding a thing type means one entry in {@link #CHILD_HANDLER_FACTORIES}; {@link
+     * #SUPPORTED_THING_TYPES_UIDS} follows from it automatically.
      * </p>
      *
      * @param thing the thing to create a handler for
@@ -112,26 +139,9 @@ public class DiagralHandlerFactory extends BaseThingHandlerFactory {
 
         if (THING_TYPE_BRIDGE.equals(thingTypeUID)) {
             return new DiagralBridgeHandler((Bridge) thing, httpClient);
-        } else if (THING_TYPE_ALARM_SYSTEM.equals(thingTypeUID)) {
-            return new DiagralSystemHandler(thing);
-        } else if (THING_TYPE_MOTION_SENSOR.equals(thingTypeUID)) {
-            return new DiagralMotionSensorHandler(thing);
-        } else if (THING_TYPE_CONTACT_SENSOR.equals(thingTypeUID)) {
-            return new DiagralContactSensorHandler(thing);
-        } else if (THING_TYPE_GROUP.equals(thingTypeUID)) {
-            return new DiagralGroupHandler(thing);
-        } else if (THING_TYPE_SIREN.equals(thingTypeUID)) {
-            return new DiagralSirenHandler(thing);
-        } else if (THING_TYPE_KEYPAD.equals(thingTypeUID)) {
-            return new DiagralKeypadHandler(thing);
-        } else if (THING_TYPE_PLUG.equals(thingTypeUID)) {
-            return new DiagralPlugHandler(thing);
-        } else if (THING_TYPE_TRANSMITTER.equals(thingTypeUID)) {
-            return new DiagralTransmitterHandler(thing);
-        } else if (THING_TYPE_CAMERA.equals(thingTypeUID)) {
-            return new DiagralCameraHandler(thing);
         }
 
-        return null;
+        Function<Thing, ThingHandler> handlerFactory = CHILD_HANDLER_FACTORIES.get(thingTypeUID);
+        return handlerFactory == null ? null : handlerFactory.apply(thing);
     }
 }

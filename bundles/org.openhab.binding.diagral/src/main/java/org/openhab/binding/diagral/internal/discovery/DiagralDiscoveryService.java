@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -120,12 +121,15 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
         // Discover alarm system
         discoverAlarmSystem(bridgeHandler, config.alarm);
 
-        // Discover devices
-        discoverSensors(bridgeHandler, config.sensors);
-        discoverSirens(bridgeHandler, config.sirens);
-        discoverCommands(bridgeHandler, config.commands);
-        discoverTransmitters(bridgeHandler, config.transmitters);
-        discoverCameras(bridgeHandler, config.cameras);
+        // Discover devices. Each category differs only in which thing type its devices map to, so they
+        // all go through one loop with a classifier: fixed for the categories that map 1:1, per-device for
+        // sensors (resolved from type/refCode) and transmitters (split on isPlug).
+        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
+        discoverCategory(bridgeUID, config.sensors, DiagralDiscoveryService::classifySensor);
+        discoverCategory(bridgeUID, config.sirens, fixedKind(THING_TYPE_SIREN, "Siren"));
+        discoverCategory(bridgeUID, config.commands, fixedKind(THING_TYPE_KEYPAD, "Keypad"));
+        discoverCategory(bridgeUID, config.transmitters, DiagralDiscoveryService::classifyTransmitter);
+        discoverCategory(bridgeUID, config.cameras, fixedKind(THING_TYPE_CAMERA, "Camera"));
 
         // Discover groups
         discoverGroups(bridgeHandler, config);
@@ -217,104 +221,76 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
     }
 
     /**
-     * Discovers sensor devices (motion/contact - the actual thing type is resolved per-device).
+     * What a discovered device should become: which thing type, and the suffix its label gets.
      *
-     * @param bridgeHandler the bridge handler
-     * @param sensors the list of sensors from the configuration
+     * @param thingTypeUID the thing type to create for this device
+     * @param labelSuffix a short human-readable category name, e.g. {@code "Siren"}
      */
-    private void discoverSensors(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> sensors) {
-        if (sensors == null) {
+    private record DeviceKind(ThingTypeUID thingTypeUID, String labelSuffix) {
+    }
+
+    /**
+     * Builds a classifier for a category whose devices all map to the same thing type.
+     *
+     * @param thingTypeUID the thing type every device in the category becomes
+     * @param labelSuffix the label suffix for the category
+     * @return a classifier that ignores the device and always returns the same kind
+     */
+    private static Function<DiagralDevice, @Nullable DeviceKind> fixedKind(ThingTypeUID thingTypeUID,
+            String labelSuffix) {
+        DeviceKind kind = new DeviceKind(thingTypeUID, labelSuffix);
+        return device -> kind;
+    }
+
+    /**
+     * Classifies a device from the API's {@code sensors} list, whose thing type depends on the individual
+     * device rather than the category (see {@link #getThingTypeForDevice}).
+     *
+     * @param device the device to classify
+     * @return the kind to create, or {@code null} if the device's type/refCode isn't recognized
+     */
+    private static @Nullable DeviceKind classifySensor(DiagralDevice device) {
+        ThingTypeUID thingTypeUID = getThingTypeForDevice(device);
+        return thingTypeUID == null ? null : new DeviceKind(thingTypeUID, "Sensor");
+    }
+
+    /**
+     * Classifies a device from the API's {@code transmitters} list, which mixes smart plugs (which support
+     * enable/disable) with generic transmitters (which don't), distinguished only by {@code isPlug}.
+     *
+     * @param device the device to classify
+     * @return the kind to create
+     */
+    private static DeviceKind classifyTransmitter(DiagralDevice device) {
+        return Boolean.TRUE.equals(device.isPlug) ? new DeviceKind(THING_TYPE_PLUG, "Plug")
+                : new DeviceKind(THING_TYPE_TRANSMITTER, "Transmitter");
+    }
+
+    /**
+     * Reports a discovery result for every device in one category of the system configuration.
+     *
+     * <p>
+     * Replaces the five near-identical per-category methods this class used to carry, which differed only
+     * in the thing type and label they passed through to {@link #discoverDevice}.
+     * </p>
+     *
+     * @param bridgeUID the bridge's thing UID
+     * @param devices the category's device list, or {@code null} if the API omitted it
+     * @param classifier decides what each device should become, or returns {@code null} to skip it
+     */
+    private void discoverCategory(ThingUID bridgeUID, @Nullable List<DiagralDevice> devices,
+            Function<DiagralDevice, @Nullable DeviceKind> classifier) {
+        if (devices == null) {
             return;
         }
 
-        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-
-        for (DiagralDevice device : sensors) {
-            if (device.getUniqueId() == null || device.type == null) {
-                continue;
-            }
-
-            ThingTypeUID thingTypeUID = getThingTypeForDevice(device);
-            if (thingTypeUID == null) {
+        for (DiagralDevice device : devices) {
+            DeviceKind kind = classifier.apply(device);
+            if (kind == null) {
                 logger.debug("Skipping device with unknown type: {} ({})", device.getUniqueId(), device.type);
                 continue;
             }
-
-            discoverDevice(bridgeUID, thingTypeUID, device, "Sensor");
-        }
-    }
-
-    /**
-     * Discovers sirens.
-     *
-     * @param bridgeHandler the bridge handler
-     * @param sirens the list of sirens from the configuration
-     */
-    private void discoverSirens(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> sirens) {
-        if (sirens == null) {
-            return;
-        }
-
-        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-        for (DiagralDevice device : sirens) {
-            discoverDevice(bridgeUID, THING_TYPE_SIREN, device, "Siren");
-        }
-    }
-
-    /**
-     * Discovers keypads (the API's "commands" device category).
-     *
-     * @param bridgeHandler the bridge handler
-     * @param commands the list of keypads from the configuration
-     */
-    private void discoverCommands(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> commands) {
-        if (commands == null) {
-            return;
-        }
-
-        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-        for (DiagralDevice device : commands) {
-            discoverDevice(bridgeUID, THING_TYPE_KEYPAD, device, "Keypad");
-        }
-    }
-
-    /**
-     * Discovers cameras.
-     *
-     * @param bridgeHandler the bridge handler
-     * @param cameras the list of cameras from the configuration
-     */
-    private void discoverCameras(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> cameras) {
-        if (cameras == null) {
-            return;
-        }
-
-        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-        for (DiagralDevice device : cameras) {
-            discoverDevice(bridgeUID, THING_TYPE_CAMERA, device, "Camera");
-        }
-    }
-
-    /**
-     * Discovers transmitters, branching per-device on {@code isPlug} to distinguish smart plugs (which
-     * support enable/disable) from generic transmitters (which don't - see
-     * {@link org.openhab.binding.diagral.internal.handler.DiagralTransmitterHandler}).
-     *
-     * @param bridgeHandler the bridge handler
-     * @param transmitters the list of transmitters from the configuration
-     */
-    private void discoverTransmitters(DiagralBridgeHandler bridgeHandler, @Nullable List<DiagralDevice> transmitters) {
-        if (transmitters == null) {
-            return;
-        }
-
-        ThingUID bridgeUID = bridgeHandler.getThing().getUID();
-        for (DiagralDevice device : transmitters) {
-            if (Boolean.TRUE.equals(device.isPlug)) {
-                discoverDevice(bridgeUID, THING_TYPE_PLUG, device, "Plug");
-            } else {
-                discoverDevice(bridgeUID, THING_TYPE_TRANSMITTER, device, "Transmitter");
-            }
+            discoverDevice(bridgeUID, kind.thingTypeUID(), device, kind.labelSuffix());
         }
     }
 
@@ -471,7 +447,7 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
      * @param device the device
      * @return the thing type UID, or null if the device's type/refCode combination isn't recognized
      */
-    private @Nullable ThingTypeUID getThingTypeForDevice(DiagralDevice device) {
+    private static @Nullable ThingTypeUID getThingTypeForDevice(DiagralDevice device) {
         String type = device.type;
         String refCode = device.refCode;
 
