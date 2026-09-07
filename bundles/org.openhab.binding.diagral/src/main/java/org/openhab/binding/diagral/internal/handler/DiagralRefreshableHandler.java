@@ -13,6 +13,7 @@
 package org.openhab.binding.diagral.internal.handler;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 
 /**
  * The {@link DiagralRefreshableHandler} is implemented by thing handlers that need to refresh
@@ -24,7 +25,14 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 public interface DiagralRefreshableHandler {
 
     /**
-     * Refreshes this handler's channels from the latest data available on the bridge.
+     * Refreshes this handler's channels from one shared view of the system.
+     *
+     * <p>
+     * The snapshot is supplied by the caller rather than each handler fetching its own data, so every
+     * handler refreshed in the same cycle reflects the same moment - see {@link DiagralPollSnapshot}.
+     * </p>
+     *
+     * @param snapshot the system state to reflect
      */
-    void refreshStatus();
+    void refreshStatus(DiagralPollSnapshot snapshot);
 }

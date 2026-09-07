@@ -15,6 +15,7 @@ package org.openhab.binding.diagral.internal.handler;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
@@ -113,8 +114,8 @@ public abstract class DiagralBaseThingHandler extends BaseThingHandler implement
     }
 
     /**
-     * Runs {@link DiagralRefreshableHandler#refreshStatus()} on the handler's scheduler instead of the
-     * calling thread.
+     * Runs {@link DiagralRefreshableHandler#refreshStatus(DiagralPollSnapshot)} on the handler's
+     * scheduler instead of the calling thread, against a snapshot captured there.
      *
      * <p>
      * Every lifecycle entry point must use this rather than calling {@code refreshStatus()} directly.
@@ -137,8 +138,12 @@ public abstract class DiagralBaseThingHandler extends BaseThingHandler implement
             if (disposed) {
                 return;
             }
+            DiagralBridgeHandler bridgeHandler = getBridgeHandler();
+            if (bridgeHandler == null) {
+                return;
+            }
             try {
-                refreshStatus();
+                refreshStatus(bridgeHandler.captureSnapshot());
             } catch (RuntimeException e) {
                 // Never let an exception escape into the scheduler, where it would be swallowed silently.
                 baseLogger.warn("Failed to refresh thing {}: {}", getThing().getUID(), e.getMessage());

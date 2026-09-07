@@ -28,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 import org.openhab.core.config.core.Configuration;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
@@ -109,9 +111,13 @@ public class DiagralBaseThingHandlerTest {
             // not under test
         }
 
-        /** Records the call, optionally blocking so a test can observe the caller was not held up. */
+        /**
+         * Records the call, optionally blocking so a test can observe the caller was not held up.
+         *
+         * @param snapshot the shared system state (unused here)
+         */
         @Override
-        public void refreshStatus() {
+        public void refreshStatus(DiagralPollSnapshot snapshot) {
             refreshes.incrementAndGet();
             refreshStarted.countDown();
             if (blockOnRefresh) {
@@ -137,6 +143,9 @@ public class DiagralBaseThingHandlerTest {
 
         Bridge bridge = mock(Bridge.class);
         when(bridge.getStatus()).thenReturn(bridgeStatus);
+        DiagralBridgeHandler bridgeHandler = mock(DiagralBridgeHandler.class);
+        when(bridgeHandler.captureSnapshot()).thenReturn(new DiagralPollSnapshot(null, null, () -> null));
+        when(bridge.getHandler()).thenReturn(bridgeHandler);
 
         TestHandler handler = new TestHandler(thing);
         handler.bridge = bridge;

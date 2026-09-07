@@ -370,6 +370,57 @@ same guard. Covered by 9 further unit tests (`DiagralBaseThingHandlerTest`, plus
   duplicate-fetch storm worse. Deliberately a second lock, not `pollLock` - sharing one would let a child
   handler's cache miss block an entire poll cycle for no reason.
 
+## C6 / P1+P2 / P3 (2026-09-07): discovery crash, per-cycle snapshot, backoff
+
+Covered by 16 further unit tests; all mutation-checked (see the note on M14 below).
+
+- **C6 - discovery can no longer be taken down by a partial API response.** `DiagralAlarm.getId()`
+  derives an id from the box serial and returns `null` when the box or serial is missing or too short;
+  that value went straight into `new ThingUID(...)`, which throws - aborting the *entire* scan, so one
+  malformed alarm record meant no devices discovered at all. Now null-checked (the result is skipped with
+  a debug line), and every id passes through `toUidSegment()`, since `ThingUID` also rejects characters
+  outside `[a-zA-Z0-9_]`. `DiagralAlarm` was also the one DTO missing `@NonNullByDefault`; adding it
+  immediately surfaced two more unguarded field reads in `discoverAlarmSystem()`, which are now locals.
+- **P1+P2 - one snapshot per refresh cycle.** `DiagralPollSnapshot` carries the status, configuration and
+  anomalies that every handler in a cycle works from. This replaces the `refreshChildHandlers()` hack that
+  re-stamped the status cache's timestamp before each handler so a shared value kept *looking* fresh -
+  correct in effect, but it worked by making the cache lie about its age, and a handler that took longer
+  than the TTL could still leave later handlers reading different data. Passing the value explicitly means
+  there is nothing to lie about. `refreshStatus()` now takes the snapshot (P1 falls out of this: anomalies
+  are fetched once per cycle instead of inline in the alarm-system handler's refresh).
+
+  **Anomalies are resolved lazily and memoised**, not eagerly: only the alarm-system handler reads them,
+  so eager resolution would make all fourteen-odd handlers pay for a response they ignore - which matters
+  because C8 dispatches lifecycle refreshes concurrently. Double-checked locking, since concurrent
+  handlers can share one snapshot.
+- **P3 - exponential backoff on 429/5xx.** `applyBackoff()` doubles the delay per consecutive occurrence
+  from the configured poll interval up to `MAX_BACKOFF_MS` (10 min); any successful poll clears it.
+  Implemented as a *deadline* that `scheduledPoll()` checks, not a rescheduled job, so the existing
+  fixed-delay schedule is untouched and only individual ticks are skipped. **Only the scheduled path backs
+  off** - a command-triggered poll runs regardless, because it exists to reflect a change the user just
+  made. Ordinary timeouts deliberately do *not* trigger backoff: this API's baseline timeout rate is
+  around 40%, so treating those as throttling would leave the binding barely polling at all.
+
+**Live testing found a gap review did not**: with C8 dispatching every handler's refresh concurrently,
+`getSystemStatus()` turned out to have the same check-then-fetch race P4 fixed for the configuration - and
+worse, because a *failed* fetch caches nothing for others to reuse. Observed right after a deploy with the
+API misbehaving: ten handlers each issued their own status request within 30ms and each waited out its own
+10-second timeout. `statusFetchLock` now single-flights it, mirroring `configurationFetchLock`; the count
+of duplicate status failures went from 10 to 0 on the next deploy. **Unit tests would not have surfaced
+this** - the race only shows under real concurrency against a real, failing API.
+
+**Known, not a regression**: the alarm-system handler refreshes twice at startup (its `initialize()` and
+`bridgeStatusChanged()` both fire, ~1ms apart), so two snapshots are captured and anomalies are fetched
+twice. The memoisation is per-snapshot and works correctly; this is two separate refreshes, and it behaved
+the same before C8 (two inline fetches instead of two scheduled ones). Cheap to fix by coalescing the two
+callbacks if it ever matters.
+
+**A mutation test caught a gap in my own tests here, worth remembering**: mutating `isBackoffWorthy()` to
+`return true` passed everything, because the only "should not back off" test threw a plain
+`DiagralException`, which never reaches the status-code check (the `instanceof DiagralApiException` guard
+short-circuits first). Added `nonThrottlingApiErrorDoesNotBackOff` with a 404 `DiagralApiException` to
+exercise the check itself. A test asserting the right outcome via the wrong path proves nothing.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation

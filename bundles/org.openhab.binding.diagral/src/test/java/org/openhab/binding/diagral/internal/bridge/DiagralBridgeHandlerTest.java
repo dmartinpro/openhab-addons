@@ -36,8 +36,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
+import org.openhab.binding.diagral.internal.exception.DiagralApiException;
 import org.openhab.binding.diagral.internal.exception.DiagralException;
 import org.openhab.core.config.core.Configuration;
 import org.openhab.core.thing.Bridge;
@@ -265,6 +267,47 @@ public class DiagralBridgeHandlerTest {
     }
 
     /**
+     * The same single-flight guarantee for the status fetch, found by live testing rather than review:
+     * with C8 dispatching every handler's refresh onto the scheduler, a cold or stale status cache had
+     * ten handlers each issuing their own request within 30ms and each waiting out its own 10s timeout,
+     * because a failed fetch caches nothing for the others to reuse.
+     */
+    @Test
+    public void concurrentCallersShareASingleStatusFetch() throws Exception {
+        int callers = 10;
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger maxInFlight = new AtomicInteger();
+        when(diagralHttpClient.getSystemStatus()).thenAnswer(invocation -> {
+            int now = inFlight.incrementAndGet();
+            maxInFlight.accumulateAndGet(now, Math::max);
+            Thread.sleep(200);
+            inFlight.decrementAndGet();
+            throw new DiagralException("Request timeout");
+        });
+
+        CountDownLatch go = new CountDownLatch(1);
+        Thread[] threads = new Thread[callers];
+        for (int i = 0; i < callers; i++) {
+            threads[i] = new Thread(() -> {
+                try {
+                    go.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                handler.getSystemStatus();
+            });
+            threads[i].start();
+        }
+        go.countDown();
+        for (Thread thread : threads) {
+            thread.join(15000);
+        }
+
+        assertThat("status fetches overlapped", maxInFlight.get(), is(1));
+    }
+
+    /**
      * C2: two polls submitted at once must not overlap. Without the lock they raced on the caches and
      * duplicated every HTTP call; with it, the second waits for the first.
      */
@@ -413,6 +456,183 @@ public class DiagralBridgeHandlerTest {
         when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralException("Request timeout"));
 
         assertThat(handler.getSystemStatus(), is(nullValue()));
+    }
+
+    /**
+     * P1/P2: one refresh cycle resolves anomalies at most once, however many handlers read them - and
+     * only if something actually does. Previously the alarm-system handler fetched them inline on every
+     * cycle, inside the sequential loop, where a slow response stalled every handler after it.
+     */
+    @Test
+    public void snapshotResolvesAnomaliesLazilyAndOnlyOnce() throws Exception {
+        DiagralAnomalies anomalies = new DiagralAnomalies();
+        when(diagralHttpClient.getAnomalies()).thenReturn(anomalies);
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+        when(diagralHttpClient.getSystemConfiguration()).thenReturn(configuration());
+
+        DiagralPollSnapshot snapshot = handler.captureSnapshot();
+
+        // Nothing has asked for anomalies yet, so nothing was fetched.
+        verify(diagralHttpClient, never()).getAnomalies();
+
+        assertThat(snapshot.anomalies(), is(sameInstance(anomalies)));
+        assertThat(snapshot.anomalies(), is(sameInstance(anomalies)));
+        assertThat(snapshot.anomalies(), is(sameInstance(anomalies)));
+
+        verify(diagralHttpClient, times(1)).getAnomalies();
+    }
+
+    /**
+     * P2: concurrent readers of one snapshot must still trigger exactly one fetch - lifecycle-driven
+     * refreshes run on the scheduler, so several handlers really can hit the same snapshot at once.
+     */
+    @Test
+    public void concurrentSnapshotReadersShareOneAnomaliesFetch() throws Exception {
+        when(diagralHttpClient.getAnomalies()).thenAnswer(invocation -> {
+            Thread.sleep(150);
+            return new DiagralAnomalies();
+        });
+        DiagralPollSnapshot snapshot = handler.captureSnapshot();
+
+        CountDownLatch go = new CountDownLatch(1);
+        Thread[] readers = new Thread[6];
+        for (int i = 0; i < readers.length; i++) {
+            readers[i] = new Thread(() -> {
+                try {
+                    go.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                snapshot.anomalies();
+            });
+            readers[i].start();
+        }
+        go.countDown();
+        for (Thread reader : readers) {
+            reader.join(10000);
+        }
+
+        verify(diagralHttpClient, times(1)).getAnomalies();
+    }
+
+    /**
+     * P2: the snapshot reports exactly the status and configuration it was built with, so every handler
+     * in a cycle sees the same moment rather than each re-reading a cache that may have moved on.
+     */
+    @Test
+    public void snapshotCarriesTheStatusAndConfigurationItWasBuiltWith() throws Exception {
+        DiagralSystemStatus status = new DiagralSystemStatus();
+        status.status = "PRESENCE";
+        DiagralSystemConfiguration config = configuration();
+        when(diagralHttpClient.getSystemStatus()).thenReturn(status);
+        when(diagralHttpClient.getSystemConfiguration()).thenReturn(config);
+
+        DiagralPollSnapshot snapshot = handler.captureSnapshot();
+
+        assertThat(snapshot.status(), is(sameInstance(status)));
+        assertThat(snapshot.configuration(), is(sameInstance(config)));
+    }
+
+    /**
+     * P3: a 429 backs scheduled polling off, so the binding stops adding load while it is being rate
+     * limited.
+     */
+    @Test
+    public void rateLimitBacksOffScheduledPolling() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralApiException("Rate limit exceeded", 429));
+
+        invokePoll();
+
+        long backoffUntil = (long) Objects.requireNonNull(get("backoffUntilMillis"));
+        assertThat("no backoff was applied", backoffUntil, is(greaterThan(System.currentTimeMillis())));
+        assertThat(((AtomicInteger) Objects.requireNonNull(get("consecutiveBackoffFailures"))).get(), is(1));
+    }
+
+    /** P3: a 5xx backs off too - retrying a broken server at full cadence helps nobody. */
+    @Test
+    public void serverErrorBacksOffScheduledPolling() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralApiException("Server error: 503", 503));
+
+        invokePoll();
+
+        assertThat((long) Objects.requireNonNull(get("backoffUntilMillis")),
+                is(greaterThan(System.currentTimeMillis())));
+    }
+
+    /**
+     * P3: an ordinary timeout is not a "slow down" signal - backing off for it would make the binding
+     * far less responsive on an API whose baseline timeout rate is already high.
+     */
+    @Test
+    public void ordinaryFailureDoesNotBackOff() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralException("Request timeout"));
+
+        invokePoll();
+
+        assertThat((long) Objects.requireNonNull(get("backoffUntilMillis")), is(0L));
+    }
+
+    /**
+     * P3: an API error that is <em>not</em> a slow-down signal must not back off either. Distinct from
+     * {@code ordinaryFailureDoesNotBackOff}, which throws a plain transport exception that never reaches
+     * the status-code check at all - this one exercises that check itself.
+     */
+    @Test
+    public void nonThrottlingApiErrorDoesNotBackOff() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralApiException("Resource not found", 404));
+
+        invokePoll();
+
+        assertThat((long) Objects.requireNonNull(get("backoffUntilMillis")), is(0L));
+        assertThat(((AtomicInteger) Objects.requireNonNull(get("consecutiveBackoffFailures"))).get(), is(0));
+    }
+
+    /** P3: the delay grows with each consecutive occurrence rather than staying flat. */
+    @Test
+    public void backoffGrowsExponentially() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralApiException("Rate limit exceeded", 429));
+
+        invokePoll();
+        long first = (long) Objects.requireNonNull(get("backoffUntilMillis")) - System.currentTimeMillis();
+        set("backoffUntilMillis", 0L);
+        invokePoll();
+        long second = (long) Objects.requireNonNull(get("backoffUntilMillis")) - System.currentTimeMillis();
+
+        assertThat("second backoff should be longer than the first", second, is(greaterThan(first)));
+    }
+
+    /** P3: a successful poll clears the backoff immediately rather than waiting the delay out. */
+    @Test
+    public void successClearsTheBackoff() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenThrow(new DiagralApiException("Rate limit exceeded", 429))
+                .thenReturn(new DiagralSystemStatus());
+
+        invokePoll();
+        assertThat((long) Objects.requireNonNull(get("backoffUntilMillis")), is(greaterThan(0L)));
+
+        invokePoll();
+
+        assertThat((long) Objects.requireNonNull(get("backoffUntilMillis")), is(0L));
+        assertThat(((AtomicInteger) Objects.requireNonNull(get("consecutiveBackoffFailures"))).get(), is(0));
+    }
+
+    /**
+     * P3: while backing off, the scheduled tick skips - but a command-triggered poll still runs, because
+     * that one exists to reflect a change the user just made.
+     */
+    @Test
+    public void backoffSkipsScheduledPollsButNotCommandTriggeredOnes() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+        set("backoffUntilMillis", System.currentTimeMillis() + 60_000);
+
+        java.lang.reflect.Method scheduledPoll = DiagralBridgeHandler.class.getDeclaredMethod("scheduledPoll");
+        scheduledPoll.setAccessible(true);
+        scheduledPoll.invoke(handler);
+        verify(diagralHttpClient, never()).getSystemStatus();
+
+        invokePoll();
+        verify(diagralHttpClient, times(1)).getSystemStatus();
     }
 
     /**
