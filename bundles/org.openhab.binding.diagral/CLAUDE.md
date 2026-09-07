@@ -335,6 +335,41 @@ every child thing following, and no bridge status change since.
    `mvn clean install` caught it** - `mvn compile`/`mvn test` kept passing against stale incremental
    classes. Do not treat a passing incremental build as evidence here.
 
+## C8 / D1 / P4 (2026-09-07): non-blocking lifecycle, shared base handler, single-flight config
+
+Done together on purpose - C8 is unsafe without P4, and doing C8 without D1 means three copies of the
+same guard. Covered by 9 further unit tests (`DiagralBaseThingHandlerTest`, plus one in
+`DiagralBridgeHandlerTest`); all four mutation-checked.
+
+- **D1 - `DiagralBaseThingHandler`** now holds what `DiagralSensorHandler`, `DiagralSystemHandler` and
+  `DiagralGroupHandler` each carried a byte-identical copy of: `getBridgeHandler()`,
+  `bridgeStatusChanged()`, and the bridge-availability check that opened all three `initialize()` methods
+  (now `goOnlineIfBridgeAvailable()`). It exists for more than tidiness - C8's disposal guard has to live
+  somewhere shared for the rule to be enforceable at all.
+- **C8 - lifecycle callbacks no longer block on the network.** `initialize()`, `bridgeStatusChanged()`
+  and `handleCommand(RefreshType)` called `refreshStatus()` inline, which reaches an API that routinely
+  uses its full 10s timeout; that is what produced the framework's recurring `Initializing handler for
+  thing ... takes more than 5000ms` warnings (40 of them in the log before this change). They now call
+  `refreshStatusAsync()`.
+
+  **What must NOT change**: `DiagralBridgeHandler.refreshChildHandlers()` still calls `refreshStatus()`
+  directly and synchronously. It runs inside one poll cycle, under `pollLock` and against a single shared
+  status snapshot - dispatching those asynchronously would break both guarantees at once. Only lifecycle
+  callbacks are offloaded. The distinction is documented on `refreshStatusAsync()` itself.
+
+  The async refresh needs a disposal guard, or a queued refresh publishes channel states through a
+  torn-down handler (`BaseThingHandler.updateState` logs a warning for that). Same trap as C3: the flag is
+  cleared in `goOnlineIfBridgeAvailable()`, **not** in `initialize()`, because the framework reuses
+  handler instances on a config edit - a flag that only ever got set would silently stop every thing
+  refreshing after its first config change. Pinned by `refreshResumesAfterReinitialisation`.
+- **P4 - `getSystemConfiguration()` is single-flight.** It was check-then-fetch with no atomicity, so
+  every thread missing the cache started its own fetch of the API's largest response; live logs showed 4
+  to 11 duplicates in a single startup burst, varying only with thread timing. Now serialised by
+  `configurationFetchLock`, with a re-check after acquiring. **This is a prerequisite for C8, not a
+  separate nicety**: offloading the refreshes widens the fan-out, so without it C8 would have made the
+  duplicate-fetch storm worse. Deliberately a second lock, not `pollLock` - sharing one would let a child
+  handler's cache miss block an entire poll cycle for no reason.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation

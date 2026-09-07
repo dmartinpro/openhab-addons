@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -207,6 +208,60 @@ public class DiagralBridgeHandlerTest {
         Object rebuilt = constructor.newInstance(value.get(cached),
                 System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1));
         set("cachedConfiguration", rebuilt);
+    }
+
+    /**
+     * P4: concurrent callers that all miss the cache must issue exactly one HTTP fetch between them, not
+     * one each.
+     *
+     * <p>
+     * This is the race live logs kept showing at startup, where every child handler initialises at once
+     * and each independently found the cache empty: 4 to 11 duplicate fetches of the API's largest
+     * response in a single burst. It matters more now that C8 dispatches those refreshes onto the
+     * scheduler, which widens the fan-out.
+     * </p>
+     */
+    @Test
+    public void concurrentCallersShareASingleConfigurationFetch() throws Exception {
+        int callers = 8;
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger maxInFlight = new AtomicInteger();
+        DiagralSystemConfiguration configuration = configuration();
+        when(diagralHttpClient.getSystemConfiguration()).thenAnswer(invocation -> {
+            int now = inFlight.incrementAndGet();
+            maxInFlight.accumulateAndGet(now, Math::max);
+            Thread.sleep(200);
+            inFlight.decrementAndGet();
+            return configuration;
+        });
+
+        CountDownLatch startTogether = new CountDownLatch(1);
+        List<DiagralSystemConfiguration> results = java.util.Collections.synchronizedList(new ArrayList<>());
+        Thread[] threads = new Thread[callers];
+        for (int i = 0; i < callers; i++) {
+            threads[i] = new Thread(() -> {
+                try {
+                    startTogether.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                DiagralSystemConfiguration result = handler.getSystemConfiguration();
+                if (result != null) {
+                    results.add(result);
+                }
+            });
+            threads[i].start();
+        }
+        startTogether.countDown();
+        for (Thread thread : threads) {
+            thread.join(10000);
+        }
+
+        verify(diagralHttpClient, times(1)).getSystemConfiguration();
+        assertThat("fetches overlapped", maxInFlight.get(), is(1));
+        assertThat("every caller got the configuration", results, hasSize(callers));
+        assertThat(results, everyItem(is(sameInstance(configuration))));
     }
 
     /**

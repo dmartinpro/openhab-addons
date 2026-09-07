@@ -23,13 +23,10 @@ import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
 import org.openhab.binding.diagral.internal.dto.DiagralDevice;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.core.library.types.OnOffType;
-import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
-import org.openhab.core.thing.binding.BaseThingHandler;
-import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.types.Command;
 import org.openhab.core.types.RefreshType;
 import org.slf4j.Logger;
@@ -56,7 +53,7 @@ import org.slf4j.LoggerFactory;
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public abstract class DiagralSensorHandler extends BaseThingHandler implements DiagralRefreshableHandler {
+public abstract class DiagralSensorHandler extends DiagralBaseThingHandler {
 
     private final Logger logger = LoggerFactory.getLogger(DiagralSensorHandler.class);
     private @Nullable String deviceId;
@@ -89,24 +86,14 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
         this.deviceId = config.deviceId;
         this.deviceIndex = config.deviceIndex;
 
-        // Check if bridge is available
-        Bridge bridge = getBridge();
-        if (bridge == null) {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR, "No bridge configured");
+        if (!goOnlineIfBridgeAvailable()) {
             return;
         }
 
-        // Check if bridge is online
-        if (bridge.getStatus() != ThingStatus.ONLINE) {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
-            return;
-        }
-
-        updateStatus(ThingStatus.ONLINE);
         logger.debug("Diagral sensor handler initialized for device: {}", deviceId);
 
-        // Initial status refresh
-        refreshStatus();
+        // Off-thread: refreshStatus() reaches the cloud API, and initialize() must return promptly.
+        refreshStatusAsync();
     }
 
     /**
@@ -120,7 +107,7 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         if (command instanceof RefreshType) {
-            refreshStatus();
+            refreshStatusAsync();
             return;
         }
 
@@ -281,39 +268,4 @@ public abstract class DiagralSensorHandler extends BaseThingHandler implements D
      * @param device the device data from the API
      */
     protected abstract void updateSensorSpecificChannels(DiagralDevice device);
-
-    /**
-     * Gets the bridge handler.
-     *
-     * @return the bridge handler, or null if not available
-     */
-    protected @Nullable DiagralBridgeHandler getBridgeHandler() {
-        Bridge bridge = getBridge();
-        if (bridge == null) {
-            return null;
-        }
-
-        ThingHandler handler = bridge.getHandler();
-        if (handler instanceof DiagralBridgeHandler bridgeHandler) {
-            return bridgeHandler;
-        }
-
-        return null;
-    }
-
-    /**
-     * Mirrors this thing's status to the bridge's status: goes {@code ONLINE} (and refreshes) when the
-     * bridge comes online, goes {@code OFFLINE} otherwise.
-     *
-     * @param bridgeStatusInfo the bridge's new status
-     */
-    @Override
-    public void bridgeStatusChanged(org.openhab.core.thing.ThingStatusInfo bridgeStatusInfo) {
-        if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE) {
-            updateStatus(ThingStatus.ONLINE);
-            refreshStatus();
-        } else {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
-        }
-    }
 }
