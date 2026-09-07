@@ -53,6 +53,23 @@ There is currently no `src/test` directory in this bundle — no unit tests exis
 
 `DiagralHandlerFactory` (`internal/DiagralHandlerFactory.java`) maps `ThingTypeUID` → handler class; it's the single place new thing types must be registered.
 
+**The `armed-status` channel publishes ten distinct values, not five.** The five named modes in
+`NAMED_SYSTEM_MODES` are the only *sendable* ones (`mode-control`); the API additionally reports
+`TEMPO_1`/`TEMPO_2`/`TEMPO_GROUP` (exit-delay countdowns toward `PARTIAL1`-or-`PRESENCE`, `PARTIAL2`, and
+`FULL`-or-direct-group-activation respectively), the settled `GROUP` (resting state after a direct zone
+activation - not transitional, can persist indefinitely), and `LEARNING_MODE` (device enrollment; the
+system is *not* armed). All ten are declared as options on the `armed-status` channel-type so none render
+as raw strings; `DiagralBindingConstants.ALL_SYSTEM_STATUSES` is the single list they are kept in, and
+`DiagralArmedStatusOptionsTest` fails the build if `thing-types.xml` or the i18n bundle drifts from it.
+None of the five non-named values needs branching logic - `isGroupActive()`/`getDisplayedMode()` already
+handle them through their generic fallbacks, and the API exposes no per-group detail during the
+transitional ones to branch on anyway.
+
+**`LEARNING_MODE` was not in the original C7 brief** - it was found by enumerating every `"status"` value
+in the rotated logs before implementing, and appears there on 2026-02-27 across two sessions of several
+minutes each with `activated_groups` empty. Worth remembering as a method: the brief's four values were
+all correct, but the set was derived from recent logs only.
+
 **`alarm-system`'s `mode-control` vs. a `group`'s `active` channel are two genuinely different control paths, not
 two views of the same thing.** `mode-control` arms/disarms the whole system via one of five named modes (`OFF`/
 `FULL`/`PRESENCE`/`PARTIAL1`/`PARTIAL2`), each of which arms whichever groups are members of that mode (see each
