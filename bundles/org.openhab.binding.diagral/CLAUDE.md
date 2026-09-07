@@ -163,6 +163,32 @@ Child handlers never talk to the network directly — they always go through `ge
 - `mvn spotless:check` verifies formatting (imports sorted/grouped, 2-space indent in `pom.xml`, tab indent + 120-col in other XML); `mvn spotless:apply` fixes it. Run this before every commit.
 - `mvn clean install` also runs the guideline static analyzer; a Priority 1 finding fails the build (see Build & Test Commands above for the report path).
 
+## Integration test harness: `FakeDiagralApiServer`
+
+`src/test/java/.../testsupport/FakeDiagralApiServer.java` is a stateful in-process simulation of the
+Diagral cloud API, wired in at the same seam the unit tests already use - a mocked Jetty `HttpClient` -
+so tests can drive the **real** `DiagralHttpClient`/`DiagralAuthenticationManager`/`DiagralBridgeHandler`
+together with no network and no mocked business logic.
+
+It reproduces this bundle's live-confirmed quirks rather than an idealised API: the transitional
+`TEMPO_1`/`TEMPO_2`/`TEMPO_GROUP` window before a command settles, `activated_groups` populated **only**
+at the settled `GROUP` status, `anomalies` returning 404 when nothing is inhibited, and the
+enable/disable endpoint returning an empty-bodied 500 despite having applied the change. It also injects
+faults (timeout, `EOFException`, arbitrary HTTP status) in front of any request.
+
+**Why it matters**: it closes gaps this file previously recorded as unverifiable. Three specifically:
+crossing `MAX_CONSECUTIVE_POLL_FAILURES` (previously "not practical to arrange" against the real API),
+S2's dispose-time API-key deletion (previously "half-confirmed"), and `isGroupActive()`'s settled-`GROUP`
+branch (previously provable only by arming a zone from the e-ONE app by hand).
+
+All fixtures are synthetic - `user@example.test` / `SERIAL1` / PIN `1234`. Keep it that way: no real
+serial, label, or credential from a live installation belongs in this repository.
+
+**Caveat the fake documents about itself**: the status codes it returns for a bad HMAC or wrong PIN are a
+reasonable simulation choice, not observed fact, unlike the 400/401/403/404/429 handling in
+`DiagralHttpClient`, which came from real traffic. Do not cite the fake as evidence of real API
+behaviour.
+
 ## Testing conventions (for when tests are added)
 
 (From https://www.openhab.org/docs/developer/tests.html — this bundle has no tests yet, but new ones must follow these rules or Maven's Surefire plugin won't pick them up / the build guidelines will flag them.)
