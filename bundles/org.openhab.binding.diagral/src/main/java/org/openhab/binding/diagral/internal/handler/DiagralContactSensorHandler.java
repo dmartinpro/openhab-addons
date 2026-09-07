@@ -16,8 +16,8 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.binding.diagral.internal.dto.DiagralDevice;
-import org.openhab.core.library.types.OpenClosedType;
 import org.openhab.core.thing.Thing;
+import org.openhab.core.types.UnDefType;
 
 /**
  * The {@link DiagralContactSensorHandler} handles contact/door sensors.
@@ -30,7 +30,8 @@ import org.openhab.core.thing.Thing;
  * <p>
  * Additional channels beyond base sensor:
  * <ul>
- * <li>{@code contact} - Contact state (OPEN/CLOSED)</li>
+ * <li>{@code contact} - Contact state, always {@code UNDEF} - see
+ * {@link #updateSensorSpecificChannels(DiagralDevice)}</li>
  * </ul>
  * </p>
  *
@@ -49,15 +50,26 @@ public class DiagralContactSensorHandler extends DiagralSensorHandler {
     }
 
     /**
-     * Updates the {@code contact} channel.
+     * Sets the {@code contact} channel to {@code UNDEF}.
      *
-     * @param device the device data from the API (unused - see below)
+     * <p>
+     * The Diagral cloud API this binding uses exposes no real-time open/closed state - only device
+     * inventory, inhibit status and anomalies. This channel therefore reports {@code UNDEF} ("unknown")
+     * rather than a value.
+     * </p>
+     *
+     * <p>
+     * It previously published a hardcoded {@code CLOSED}, which was actively misleading in a security
+     * binding: the channel asserted "this door is shut" forever, regardless of reality. {@code UNDEF} is
+     * distinguishable from a genuine {@code CLOSED}, so a rule can detect that the value is unavailable
+     * instead of silently trusting it. The channel is kept (rather than removed) so existing item links
+     * don't break.
+     * </p>
+     *
+     * @param device the device data from the API (unused - it carries no contact state)
      */
     @Override
     protected void updateSensorSpecificChannels(DiagralDevice device) {
-        // Contact sensors don't provide real-time contact status from the API
-        // The contact state would need to be inferred from system events or a different API
-        // For now, we default to CLOSED (door/window closed)
-        updateState(CHANNEL_CONTACT, OpenClosedType.CLOSED);
+        updateState(CHANNEL_CONTACT, UnDefType.UNDEF);
     }
 }
