@@ -185,6 +185,25 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private final ReentrantLock pollLock = new ReentrantLock();
 
     /**
+     * Makes {@link #getSystemConfiguration()} single-flight: concurrent callers that all find the cache
+     * empty or expired issue one HTTP request between them, instead of one each.
+     *
+     * <p>
+     * The method is a check-then-fetch with no atomicity, so every thread that misses the cache used to
+     * start its own fetch of the largest response this API returns. Live-observed repeatedly at startup,
+     * where all child handlers initialise at once: 4 to 11 duplicate fetches of the same configuration in
+     * a single burst, varying only with thread timing. Serialising the fetch means the first caller does
+     * the work and the rest return its result.
+     * </p>
+     *
+     * <p>
+     * Deliberately separate from {@link #pollLock} - these guard unrelated things, and sharing one lock
+     * would make a child handler's cache miss block an entire poll cycle for no reason.
+     * </p>
+     */
+    private final ReentrantLock configurationFetchLock = new ReentrantLock();
+
+    /**
      * Set once {@link #dispose()} has run, so work already scheduled - in particular the
      * self-rescheduling {@link #attemptInitialAuthentication(DiagralBridgeConfiguration)} retry - stops
      * instead of running on, and possibly restarting polling, after this handler is gone.
@@ -722,22 +741,36 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             return cached.value();
         }
 
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            return cached == null ? null : cached.value();
-        }
-
+        // Only one caller fetches; the rest wait and then take the result from the cache below.
+        configurationFetchLock.lock();
         try {
-            DiagralSystemConfiguration configuration = client.getSystemConfiguration();
-            cachedConfiguration = new Cached<>(configuration, System.currentTimeMillis());
-            return configuration;
-        } catch (DiagralException e) {
-            if (cached != null) {
-                logger.debug("Failed to refresh system configuration, serving the previous one: {}", e.getMessage());
+            // Re-check after acquiring: whoever held the lock has very likely just refreshed it, which is
+            // exactly the duplicate fetch this lock exists to avoid.
+            cached = cachedConfiguration;
+            if (cached != null && cached.isFreshAt(System.currentTimeMillis(), CONFIGURATION_CACHE_TTL_MS)) {
                 return cached.value();
             }
-            logger.warn("Failed to get system configuration: {}", e.getMessage());
-            return null;
+
+            DiagralHttpClient client = diagralHttpClient;
+            if (client == null) {
+                return cached == null ? null : cached.value();
+            }
+
+            try {
+                DiagralSystemConfiguration configuration = client.getSystemConfiguration();
+                cachedConfiguration = new Cached<>(configuration, System.currentTimeMillis());
+                return configuration;
+            } catch (DiagralException e) {
+                if (cached != null) {
+                    logger.debug("Failed to refresh system configuration, serving the previous one: {}",
+                            e.getMessage());
+                    return cached.value();
+                }
+                logger.warn("Failed to get system configuration: {}", e.getMessage());
+                return null;
+            }
+        } finally {
+            configurationFetchLock.unlock();
         }
     }
 
