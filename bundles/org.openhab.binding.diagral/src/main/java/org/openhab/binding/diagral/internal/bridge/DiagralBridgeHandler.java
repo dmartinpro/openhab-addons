@@ -339,10 +339,18 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
 
         DiagralBridgeConfiguration config = getConfigAs(DiagralBridgeConfiguration.class);
 
-        // Validate configuration
-        if (!config.isValid()) {
+        // Validate configuration. Reported separately so the message points at the actual problem.
+        if (!config.hasCredentials()) {
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
                     "Invalid configuration: Check username, password, serialId, and pinCode");
+            return;
+        }
+
+        if (!config.isRefreshIntervalValid()) {
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
+                    "Invalid configuration: refreshInterval must be between "
+                            + DiagralBridgeConfiguration.MIN_REFRESH_INTERVAL_SECONDS + " and "
+                            + DiagralBridgeConfiguration.MAX_REFRESH_INTERVAL_SECONDS + " seconds");
             return;
         }
 
@@ -481,7 +489,10 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             updateStatus(ThingStatus.ONLINE);
             logger.info("Bridge online - authentication successful");
         } catch (DiagralAuthenticationException e) {
-            logger.error("Authentication failed: {}", e.getMessage());
+            // warn, not error: the usual cause is a wrong or expired credential, which is a user
+            // configuration problem rather than a fault in the binding. The ThingStatus detail set below
+            // is what actually surfaces it to the user.
+            logger.warn("Authentication failed: {}", e.getMessage());
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
                     "Authentication failed: " + e.getMessage());
             throw e;
@@ -598,7 +609,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
                     authenticate();
                     logger.info("Re-authentication successful");
                 } catch (DiagralException ex) {
-                    logger.error("Re-authentication failed", ex);
+                    // No stack trace: an expected user/config/network failure, per the logging guideline.
+                    logger.warn("Re-authentication failed: {}", ex.getMessage());
                 }
             });
         } catch (DiagralException e) {
@@ -926,7 +938,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         try {
             command.run(client);
         } catch (DiagralException e) {
-            logger.error("Failed to {}: {}", description, e.getMessage());
+            // warn, not error: a timed-out command is routine on this API and often applied anyway - the
+            // re-poll below is what resolves the real state.
+            logger.warn("Failed to {}: {}", description, e.getMessage());
         } finally {
             scheduler.execute(this::poll);
         }
@@ -980,7 +994,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * {@link #CONFIGURATION_CACHE_TTL_MS} - see that constant for why the lifetime is bounded rather than
      * indefinite, and why it is nonetheless much longer than the poll interval. The cache is also
      * invalidated outright after a (possibly-successful) {@link #enableDevice}/{@link #disableDevice}
-     * call, and by {@link #refreshConfiguration()}.
+     * call.
      * </p>
      *
      * <p>
@@ -1305,20 +1319,6 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     public void disableDevice(String productType, int productId) {
         deviceCommand("disable device " + productId + " (" + productType + ")",
                 client -> client.disableProduct(productType, productId));
-    }
-
-    /**
-     * Forces a fresh fetch of the system configuration, discarding whatever is currently cached rather
-     * than waiting for {@link #CONFIGURATION_CACHE_TTL_MS} to elapse.
-     *
-     * <p>
-     * Invalidates the cache and immediately re-fetches (synchronously, on the calling thread) so the
-     * cache is warm again by the time this method returns.
-     * </p>
-     */
-    public void refreshConfiguration() {
-        cachedConfiguration = null;
-        getSystemConfiguration();
     }
 
     /**
