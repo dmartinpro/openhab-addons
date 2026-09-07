@@ -16,6 +16,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
@@ -119,29 +120,31 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
     }
 
     /**
-     * Refreshes the system status from the bridge and updates all channels.
+     * Refreshes the system status from the shared snapshot and updates all channels.
+     *
+     * @param snapshot the system state to reflect
      */
     @Override
-    public void refreshStatus() {
+    public void refreshStatus(DiagralPollSnapshot snapshot) {
         DiagralBridgeHandler bridgeHandler = getBridgeHandler();
         if (bridgeHandler == null) {
             logger.debug("Cannot refresh status - bridge handler not available");
             return;
         }
 
-        DiagralSystemStatus status = bridgeHandler.getSystemStatus();
+        DiagralSystemStatus status = snapshot.status();
         if (status == null) {
             logger.debug("No system status available");
             return;
         }
 
-        DiagralSystemConfiguration config = bridgeHandler.getSystemConfiguration();
+        DiagralSystemConfiguration config = snapshot.configuration();
         if (config == null) {
             logger.debug("No system configuration available");
             return;
         }
 
-        updateChannels(status, config, bridgeHandler);
+        updateChannels(status, config, bridgeHandler, snapshot);
     }
 
     /**
@@ -149,11 +152,11 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
      *
      * @param status the system status from the API
      * @param config the system configuration from the API
-     * @param bridgeHandler the bridge handler, used to fetch the current anomalies and the mode to display
-     *            on {@code mode-control}
+     * @param bridgeHandler the bridge handler, used to derive the mode to display on {@code mode-control}
+     * @param snapshot the shared system state, which supplies the status and the anomalies
      */
     private void updateChannels(DiagralSystemStatus status, DiagralSystemConfiguration config,
-            DiagralBridgeHandler bridgeHandler) {
+            DiagralBridgeHandler bridgeHandler, DiagralPollSnapshot snapshot) {
         // Update armed status
         String statusStr = status.status;
         if (statusStr != null) {
@@ -163,7 +166,7 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
         // Mirror the current mode onto mode-control itself, so this writable channel doesn't stay
         // permanently NULL (see DiagralBridgeHandler.getDisplayedMode() for how it's derived - only ever
         // one of the five named modes, holding the last selection during a transitional status).
-        String displayedMode = bridgeHandler.getDisplayedMode();
+        String displayedMode = bridgeHandler.getDisplayedMode(snapshot);
         if (displayedMode != null) {
             updateState(CHANNEL_MODE_CONTROL, new StringType(displayedMode));
         }
@@ -179,8 +182,9 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
             updateState(CHANNEL_CENTRAL_LOW_BATTERY, OnOffType.OFF);
         }
 
-        // Update anomalies
-        DiagralAnomalies anomalies = bridgeHandler.getAnomalies();
+        // Update anomalies - resolved lazily by the snapshot, so this is the only handler that pays
+        // for the fetch, and only once per cycle no matter how many handlers share the snapshot.
+        DiagralAnomalies anomalies = snapshot.anomalies();
         int anomalyCount = anomalies != null ? anomalies.getTotalCount() : 0;
         updateState(CHANNEL_ANOMALIES_PRESENT, OnOffType.from(anomalyCount > 0));
         updateState(CHANNEL_ANOMALY_COUNT, new DecimalType(anomalyCount));

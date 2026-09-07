@@ -42,6 +42,7 @@ import java.util.stream.Collectors;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.http.HttpStatus;
 import org.openhab.binding.diagral.internal.DiagralBridgeConfiguration;
 import org.openhab.binding.diagral.internal.discovery.DiagralDiscoveryService;
 import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
@@ -49,6 +50,7 @@ import org.openhab.binding.diagral.internal.dto.DiagralGroup;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemDetails;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
+import org.openhab.binding.diagral.internal.exception.DiagralApiException;
 import org.openhab.binding.diagral.internal.exception.DiagralAuthenticationException;
 import org.openhab.binding.diagral.internal.exception.DiagralException;
 import org.openhab.binding.diagral.internal.handler.DiagralRefreshableHandler;
@@ -123,6 +125,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * </p>
      */
     private static final long CONFIGURATION_CACHE_TTL_MS = 300_000;
+
+    /**
+     * Upper bound on how long {@link #poll()} backs off after the API asks it to slow down.
+     *
+     * <p>
+     * Ten minutes: long enough to actually relieve a rate limit or a server-side outage, short enough
+     * that recovery is still noticed promptly once the API returns.
+     * </p>
+     */
+    private static final long MAX_BACKOFF_MS = 600_000;
 
     private final Logger logger = LoggerFactory.getLogger(DiagralBridgeHandler.class);
 
@@ -204,11 +216,45 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private final ReentrantLock configurationFetchLock = new ReentrantLock();
 
     /**
+     * Makes {@link #getSystemStatus()} single-flight, for the same reason as
+     * {@link #configurationFetchLock}.
+     *
+     * <p>
+     * The short-lived status cache collapses repeat reads only once a fetch has <em>succeeded</em>: a
+     * failed fetch caches nothing, so every caller that missed the cache goes to the network on its own.
+     * Live-observed right after the bridge came online with the API misbehaving - ten handlers each
+     * issued their own status request within 30ms and each waited out its own 10-second timeout. Adding
+     * this lock means the first caller makes the request and the rest reuse its outcome, whether that is
+     * a value or a failure.
+     * </p>
+     */
+    private final ReentrantLock statusFetchLock = new ReentrantLock();
+
+    /**
      * Set once {@link #dispose()} has run, so work already scheduled - in particular the
      * self-rescheduling {@link #attemptInitialAuthentication(DiagralBridgeConfiguration)} retry - stops
      * instead of running on, and possibly restarting polling, after this handler is gone.
      */
     private volatile boolean disposed;
+
+    /**
+     * How many rate-limit/server-error responses have arrived in a row, driving the exponential delay in
+     * {@link #applyBackoff(int)}. Reset by any successful poll.
+     */
+    private final AtomicInteger consecutiveBackoffFailures = new AtomicInteger();
+
+    /**
+     * Wall-clock time before which scheduled polling stays quiet - see {@link #scheduledPoll()}.
+     *
+     * <p>
+     * Zero when not backing off. Deliberately a deadline rather than a rescheduled job, so the existing
+     * fixed-delay schedule is left intact and only individual ticks are skipped.
+     * </p>
+     */
+    private volatile long backoffUntilMillis;
+
+    /** The configured poll interval, kept so the backoff can be expressed as a multiple of it. */
+    private volatile int refreshIntervalSeconds = 60;
 
     /**
      * Best-effort, locally-tracked set of group IDs believed active while the real API's {@code /status}
@@ -288,6 +334,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         // never come back online after a config change.
         disposed = false;
         consecutivePollFailures.set(0);
+        consecutiveBackoffFailures.set(0);
+        backoffUntilMillis = 0;
 
         DiagralBridgeConfiguration config = getConfigAs(DiagralBridgeConfiguration.class);
 
@@ -449,7 +497,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         stopPolling();
 
         logger.debug("Starting polling with interval {} seconds", intervalSeconds);
-        pollingJob = scheduler.scheduleWithFixedDelay(this::poll, 0, intervalSeconds, TimeUnit.SECONDS);
+        refreshIntervalSeconds = intervalSeconds;
+        pollingJob = scheduler.scheduleWithFixedDelay(this::scheduledPoll, 0, intervalSeconds, TimeUnit.SECONDS);
     }
 
     /**
@@ -473,7 +522,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * changes device/system state (e.g. {@link #setSystemMode}, {@link #enableDevice}) so the UI
      * reflects the change promptly rather than waiting for the next scheduled tick. On success, resets
      * {@link #consecutivePollFailures}, keeps the bridge {@code ONLINE}, and calls {@link
-     * #refreshChildHandlers()}. On an authentication failure, schedules a re-authentication attempt
+     * #refreshChildHandlers}. On an authentication failure, schedules a re-authentication attempt
      * rather than going offline immediately (this doesn't touch {@link #consecutivePollFailures}, which
      * only tracks plain failures - see that field's Javadoc). On any other failure, logs a warning and
      * increments {@link #consecutivePollFailures}; a single failed poll still doesn't flip the bridge
@@ -482,6 +531,28 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * bridge silently {@code ONLINE} forever.
      * </p>
      */
+    /**
+     * The scheduled polling tick: honours any active backoff, then polls.
+     *
+     * <p>
+     * Only the scheduled path checks the backoff. A poll submitted by a command runs regardless, because
+     * that one exists to reflect a change the user just made - suppressing it would leave the UI stale
+     * for exactly the reason the immediate re-poll was introduced to prevent, and it is a single request
+     * rather than a repeating load.
+     * </p>
+     */
+    private void scheduledPoll() {
+        long backoffUntil = backoffUntilMillis;
+        if (backoffUntil > 0) {
+            long remainingMillis = backoffUntil - System.currentTimeMillis();
+            if (remainingMillis > 0) {
+                logger.debug("Skipping scheduled poll - backing off for another {}s", remainingMillis / 1000);
+                return;
+            }
+        }
+        poll();
+    }
+
     private void poll() {
         if (disposed) {
             return;
@@ -512,13 +583,14 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             DiagralSystemStatus status = fetchAndCacheSystemStatus(client);
             logger.trace("System status retrieved: {}", status.status);
             consecutivePollFailures.set(0);
+            clearBackoff();
 
             // Ensure bridge stays online
             if (getThing().getStatus() != ThingStatus.ONLINE) {
                 updateStatus(ThingStatus.ONLINE);
             }
 
-            refreshChildHandlers();
+            refreshChildHandlers(captureSnapshot(status));
         } catch (DiagralAuthenticationException e) {
             logger.warn("Authentication lost during polling, attempting re-authentication");
             scheduler.execute(() -> {
@@ -535,6 +607,9 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // Don't go offline on an isolated failure - this API's transient flakiness usually self-heals
             // within 1-3 cycles - but a sustained outage shouldn't leave the bridge silently ONLINE
             // forever either, so flip OFFLINE once too many consecutive failures pile up.
+            if (e instanceof DiagralApiException apiException && isBackoffWorthy(apiException.getStatusCode())) {
+                applyBackoff(apiException.getStatusCode());
+            }
             int failures = consecutivePollFailures.incrementAndGet();
             if (failures >= MAX_CONSECUTIVE_POLL_FAILURES) {
                 logger.warn("Bridge going OFFLINE after {} consecutive poll failures", failures);
@@ -542,6 +617,49 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
                         failures + " consecutive poll failures - last error: " + e.getMessage());
             }
         }
+    }
+
+    /**
+     * Reports whether an HTTP status means "stop hammering me" rather than "this one request failed".
+     *
+     * @param statusCode the status code the API returned
+     * @return {@code true} for 429 and any 5xx, the two cases where retrying at the normal cadence makes
+     *         things worse rather than better
+     */
+    private static boolean isBackoffWorthy(int statusCode) {
+        return statusCode == HttpStatus.TOO_MANY_REQUESTS_429 || statusCode >= 500;
+    }
+
+    /**
+     * Backs scheduled polling off exponentially after a rate-limit or server-error response.
+     *
+     * <p>
+     * The delay doubles per consecutive occurrence, starting from the configured poll interval and capped
+     * at {@link #MAX_BACKOFF_MS}. Only affects the scheduled path - see {@link #scheduledPoll()}.
+     * </p>
+     *
+     * @param statusCode the status code that triggered the backoff, for the log line
+     */
+    private void applyBackoff(int statusCode) {
+        int occurrences = consecutiveBackoffFailures.incrementAndGet();
+        // Shift rather than pow, and clamp the exponent so it cannot overflow on a long outage.
+        long base = TimeUnit.SECONDS.toMillis(refreshIntervalSeconds);
+        long delayMillis = Math.min(MAX_BACKOFF_MS, base << Math.min(occurrences - 1, 20));
+        backoffUntilMillis = System.currentTimeMillis() + delayMillis;
+        logger.warn("API returned {} - backing off scheduled polling for {}s (occurrence {})", statusCode,
+                delayMillis / 1000, occurrences);
+    }
+
+    /**
+     * Clears any active backoff after a successful poll, so normal cadence resumes immediately rather
+     * than waiting out a delay that is no longer warranted.
+     */
+    private void clearBackoff() {
+        if (backoffUntilMillis != 0) {
+            logger.info("API is responding again - resuming normal polling cadence");
+            backoffUntilMillis = 0;
+        }
+        consecutiveBackoffFailures.set(0);
     }
 
     /**
@@ -559,33 +677,61 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Notifies child thing handlers that implement {@link DiagralRefreshableHandler} so their channels
-     * stay up to date on the polling interval, not only on a manual refresh command.
+     * Builds the single {@link DiagralPollSnapshot} that one refresh cycle works from.
      *
      * <p>
-     * Re-stamps the cached status's timestamp to "now" immediately before each handler's {@link
-     * DiagralRefreshableHandler#refreshStatus()} call (added 2026-09-04, see the entry in this bundle's
-     * {@code CLAUDE.md} for the live-verified failure it fixes). This exists because every handler
-     * independently calls {@link #getSystemStatus()}, which only skips a fresh network fetch while the
-     * cache is within {@link #SYSTEM_STATUS_CACHE_TTL_MS} - a single slow handler earlier in this same
-     * loop (confirmed live: {@code DiagralSystemHandler}'s uncached {@link #getAnomalies()} call took over
-     * 6 seconds in one observed cycle) can otherwise let that window lapse for every handler still to
-     * come, each of which then risks its own slow/failing independent fetch instead of reusing the one
-     * snapshot this whole poll cycle is meant to share. Re-stamping right before each call keeps the
-     * shared snapshot looking fresh for the handler about to use it, without changing the underlying
-     * value or touching {@link DiagralRefreshableHandler}'s signature.
+     * Anomalies are deliberately left unresolved here - see that class's Javadoc for why they are fetched
+     * lazily rather than with the rest.
      * </p>
+     *
+     * @param status the status this cycle should use, or {@code null} if it could not be fetched
+     * @return a snapshot every handler in this cycle can share
      */
-    private void refreshChildHandlers() {
+    private DiagralPollSnapshot captureSnapshot(@Nullable DiagralSystemStatus status) {
+        return new DiagralPollSnapshot(status, getSystemConfiguration(), this::getAnomalies);
+    }
+
+    /**
+     * Builds a snapshot for a caller outside the poll cycle - a thing handler refreshing itself after it
+     * or its bridge came online.
+     *
+     * <p>
+     * Reads the status through {@link #getSystemStatus()}, whose short-lived cache is what stops the
+     * fourteen-odd handlers that come online together from each issuing their own request.
+     * </p>
+     *
+     * @return a snapshot of the system as currently known
+     */
+    public DiagralPollSnapshot captureSnapshot() {
+        return captureSnapshot(getSystemStatus());
+    }
+
+    /**
+     * Refreshes every child thing handler that implements {@link DiagralRefreshableHandler} from one
+     * shared snapshot, so their channels stay up to date on the polling interval rather than only on a
+     * manual refresh command.
+     *
+     * <p>
+     * Handing each handler the same {@link DiagralPollSnapshot} is what replaced the previous approach of
+     * re-stamping a cache timestamp before every call to keep a shared value looking fresh. That worked
+     * by making the cache lie about its age; passing the value explicitly means there is nothing to lie
+     * about, and no way for a slow handler to leave the ones after it reading different data.
+     * </p>
+     *
+     * <p>
+     * Calls {@link DiagralRefreshableHandler#refreshStatus(DiagralPollSnapshot)} directly and
+     * synchronously, on purpose - see {@code DiagralBaseThingHandler.refreshStatusAsync()} for why only
+     * lifecycle callbacks are offloaded and this loop is not.
+     * </p>
+     *
+     * @param snapshot the system state every handler in this cycle should reflect
+     */
+    private void refreshChildHandlers(DiagralPollSnapshot snapshot) {
         for (Thing childThing : getThing().getThings()) {
             ThingHandler handler = childThing.getHandler();
             if (handler instanceof DiagralRefreshableHandler refreshableHandler) {
-                Cached<DiagralSystemStatus> snapshot = cachedSystemStatus;
-                if (snapshot != null) {
-                    cachedSystemStatus = new Cached<>(snapshot.value(), System.currentTimeMillis());
-                }
                 try {
-                    refreshableHandler.refreshStatus();
+                    refreshableHandler.refreshStatus(snapshot);
                 } catch (RuntimeException e) {
                     logger.warn("Failed to refresh child thing {}: {}", childThing.getUID(), e.getMessage());
                 }
@@ -661,12 +807,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * <p>
      * Returns a short-lived cached value (see {@link #SYSTEM_STATUS_CACHE_TTL_MS}) when available, so
      * that several child handlers refreshing within the same poll tick don't each trigger their own
-     * HTTP call. {@link #refreshChildHandlers()} re-stamps the cache's timestamp before each handler it
-     * calls, so in practice every handler within one poll cycle sees this same snapshot rather than
-     * racing the TTL against how long earlier handlers in that same cycle took.
+     * HTTP call. Since the poll cycle now hands every handler one shared {@link DiagralPollSnapshot},
+     * this cache mainly serves callers outside that cycle - notably the handlers that all come online
+     * together when the bridge does, each of which captures its own snapshot.
      * </p>
      *
-     * @return the system status, or null if not available
+     * @return the current system status, or null if it isn't available
      */
     public @Nullable DiagralSystemStatus getSystemStatus() {
         Cached<DiagralSystemStatus> cached = cachedSystemStatus;
@@ -674,16 +820,27 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             return cached.value();
         }
 
-        DiagralHttpClient client = diagralHttpClient;
-        if (client == null) {
-            return null;
-        }
-
+        statusFetchLock.lock();
         try {
-            return fetchAndCacheSystemStatus(client);
-        } catch (DiagralException e) {
-            logger.warn("Failed to get system status: {}", e.getMessage());
-            return null;
+            // Re-check after acquiring: whoever held the lock has very likely just refreshed the cache.
+            cached = cachedSystemStatus;
+            if (cached != null && cached.isFreshAt(System.currentTimeMillis(), SYSTEM_STATUS_CACHE_TTL_MS)) {
+                return cached.value();
+            }
+
+            DiagralHttpClient client = diagralHttpClient;
+            if (client == null) {
+                return null;
+            }
+
+            try {
+                return fetchAndCacheSystemStatus(client);
+            } catch (DiagralException e) {
+                logger.warn("Failed to get system status: {}", e.getMessage());
+                return null;
+            }
+        } finally {
+            statusFetchLock.unlock();
         }
     }
 
@@ -832,7 +989,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // outputDelay seconds before /status settles on the final named mode, at which point
             // isGroupActive() switches back to deriving straight from configuration anyway. Only done on
             // confirmed success - see the finally block below for the ambiguous (timeout/error) case.
-            Set<String> targetMembers = groupsForMode(mode);
+            Set<String> targetMembers = groupsForMode(mode, captureSnapshot());
             if (targetMembers != null) {
                 activeGroupIds.clear();
                 activeGroupIds.addAll(targetMembers);
@@ -948,14 +1105,15 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * </p>
      *
      * @param groupId the group ID to check
+     * @param snapshot the shared view of the system this refresh cycle is working from
      * @return {@code true} if this group is currently believed active
      */
-    public boolean isGroupActive(String groupId) {
-        DiagralSystemStatus status = getSystemStatus();
+    public boolean isGroupActive(String groupId, DiagralPollSnapshot snapshot) {
+        DiagralSystemStatus status = snapshot.status();
         String mode = status == null ? null : status.status;
         boolean result;
         if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
-            Set<String> members = groupsForMode(mode);
+            Set<String> members = groupsForMode(mode, snapshot);
             result = members != null && members.contains(groupId);
             logger.trace("isGroupActive({}): status={} (named mode), configMembers={}, result={}", groupId, mode,
                     members, result);
@@ -998,11 +1156,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * {@link #isGroupActive(String)}'s matching trace line.
      * </p>
      *
+     * @param snapshot the shared view of the system this refresh cycle is working from
      * @return the mode to display, or {@code null} if none is known yet (e.g. before the first successful
      *         poll or command)
      */
-    public @Nullable String getDisplayedMode() {
-        DiagralSystemStatus status = getSystemStatus();
+    public @Nullable String getDisplayedMode(DiagralPollSnapshot snapshot) {
+        DiagralSystemStatus status = snapshot.status();
         String mode = status == null ? null : status.status;
         if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
             lastKnownMode = mode;
@@ -1021,11 +1180,12 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      *
      * @param mode one of the five named modes ({@link
      *            org.openhab.binding.diagral.internal.DiagralBindingConstants#NAMED_SYSTEM_MODES})
+     * @param snapshot the shared view of the system this refresh cycle is working from
      * @return the member group IDs for {@code mode}, or {@code null} if the system configuration isn't
      *         cached yet (too early to tell) or {@code mode} isn't a recognized named mode
      */
-    private @Nullable Set<String> groupsForMode(String mode) {
-        DiagralSystemConfiguration config = getSystemConfiguration();
+    private @Nullable Set<String> groupsForMode(String mode, DiagralPollSnapshot snapshot) {
+        DiagralSystemConfiguration config = snapshot.configuration();
         if (config == null) {
             return null;
         }

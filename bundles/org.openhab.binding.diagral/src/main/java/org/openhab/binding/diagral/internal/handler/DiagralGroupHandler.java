@@ -18,6 +18,7 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.DiagralConfiguration;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.ChannelUID;
@@ -139,10 +140,12 @@ public class DiagralGroupHandler extends DiagralBaseThingHandler {
     }
 
     /**
-     * Refreshes the group status from the bridge and updates all channels.
+     * Refreshes the group status from the shared snapshot and updates all channels.
+     *
+     * @param snapshot the system state to reflect
      */
     @Override
-    public void refreshStatus() {
+    public void refreshStatus(DiagralPollSnapshot snapshot) {
         String currentGroupId = groupId;
         if (currentGroupId == null) {
             logger.debug("Cannot refresh status - group ID not set");
@@ -155,7 +158,7 @@ public class DiagralGroupHandler extends DiagralBaseThingHandler {
             return;
         }
 
-        updateChannels(currentGroupId, bridgeHandler);
+        updateChannels(currentGroupId, bridgeHandler, snapshot);
     }
 
     /**
@@ -171,9 +174,10 @@ public class DiagralGroupHandler extends DiagralBaseThingHandler {
      *
      * @param groupId the group ID
      * @param bridgeHandler the bridge handler, asked whether this group is currently active
+     * @param snapshot the shared system state the answer is derived from
      */
-    private void updateChannels(String groupId, DiagralBridgeHandler bridgeHandler) {
-        boolean isActive = bridgeHandler.isGroupActive(groupId);
+    private void updateChannels(String groupId, DiagralBridgeHandler bridgeHandler, DiagralPollSnapshot snapshot) {
+        boolean isActive = bridgeHandler.isGroupActive(groupId, snapshot);
 
         updateState(CHANNEL_GROUP_ACTIVE, OnOffType.from(isActive));
         updateState(CHANNEL_GROUP_STATUS, new StringType(isActive ? "Active" : "Inactive"));
