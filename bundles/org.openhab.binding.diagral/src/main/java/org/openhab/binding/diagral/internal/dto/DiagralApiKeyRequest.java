@@ -30,6 +30,7 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralApiKeyRequest {
 
+    /** The serial ID of the Diagral box to generate an API key for. */
     @SerializedName("serial_id")
     public String serialId;
 

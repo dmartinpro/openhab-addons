@@ -212,4 +212,61 @@ public class FakeDiagralApiServerModeTransitionsTest {
         assertThat(settled.status, equalTo(MODE_FULL));
         assertThat(settled.activatedGroups, empty());
     }
+
+    /**
+     * Activating several groups in a single {@code activate_group} request (the {@code {"groups":[1,3]}}
+     * multi-element shape {@code DiagralHttpClient.activateGroups(List)} sends, driven from the alarm
+     * system's {@code activate-groups} channel) must go through the same transitional-then-settled
+     * sequence as a single-group activation, ending with every requested group listed in
+     * {@code activated_groups} - not just the last one, which would be the symptom of a client that only
+     * ever put one element in the array.
+     */
+    @Test
+    public void activatingMultipleGroupsInOneCallSettlesWithBothActivatedGroups() throws Exception {
+        client.activateGroups(List.of("2", "3"));
+
+        DiagralSystemStatus transitional = client.getSystemStatus();
+        assertThat(transitional.status, equalTo(MODE_TEMPO_GROUP));
+        assertThat(transitional.activatedGroups, equalTo(List.of()));
+
+        DiagralSystemStatus settled = client.getSystemStatus();
+        assertThat(settled.status, equalTo(SYSTEM_STATUS_GROUP));
+        assertThat(settled.activatedGroups, equalTo(List.of(2, 3)));
+    }
+
+    /**
+     * Disabling several of several directly-activated groups in one {@code disable_group} call must leave
+     * only the untouched group(s) active, mirroring {@link #disablingOneOfSeveralActiveGroupsLeavesTheOthersActive()}
+     * but for a batch of more than one group disabled at once.
+     */
+    @Test
+    public void disablingMultipleGroupsInOneCallLeavesTheRemainderActive() throws Exception {
+        client.activateGroups(List.of("2", "3", "4"));
+        client.getSystemStatus();
+        client.getSystemStatus();
+
+        client.disableGroups(List.of("2", "4"));
+
+        DiagralSystemStatus status = client.getSystemStatus();
+        assertThat(status.status, equalTo(SYSTEM_STATUS_GROUP));
+        assertThat(status.activatedGroups, equalTo(List.of(3)));
+    }
+
+    /**
+     * Disabling every directly-activated group in one call settles back to {@code OFF}, the same as
+     * disabling the sole remaining group one at a time does in
+     * {@link #disablingTheLastActiveGroupSettlesToOff()}.
+     */
+    @Test
+    public void disablingAllActiveGroupsInOneCallSettlesToOff() throws Exception {
+        client.activateGroups(List.of("2", "3"));
+        client.getSystemStatus();
+        client.getSystemStatus();
+
+        client.disableGroups(List.of("2", "3"));
+
+        DiagralSystemStatus status = client.getSystemStatus();
+        assertThat(status.status, equalTo(MODE_OFF));
+        assertThat(status.activatedGroups, empty());
+    }
 }

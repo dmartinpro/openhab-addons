@@ -36,15 +36,19 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralGroup {
 
+    /** The group's configured name, used as the discovered thing's label. */
     @SerializedName("name")
     public @Nullable String name;
 
+    /** The group's numeric Diagral ID, referenced elsewhere as its {@code groupId}/{@code activatedGroups} entry. */
     @SerializedName("index")
     public int index;
 
+    /** Entry delay in seconds before the alarm triggers after this group detects an intrusion. */
     @SerializedName("inputDelay")
     public int inputDelay;
 
+    /** Exit delay in seconds before this group's arming actually takes effect. */
     @SerializedName("outputDelay")
     public int outputDelay;
 }

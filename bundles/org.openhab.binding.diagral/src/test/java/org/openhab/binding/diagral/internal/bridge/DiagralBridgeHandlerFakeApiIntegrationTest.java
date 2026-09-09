@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_FULL;
@@ -250,6 +251,28 @@ public class DiagralBridgeHandlerFakeApiIntegrationTest {
         }
 
         verify(callback).statusUpdated(eq(bridge), argThat(info -> info.getStatus() == ThingStatus.OFFLINE
+                && info.getStatusDetail() == ThingStatusDetail.COMMUNICATION_ERROR));
+    }
+
+    /**
+     * Once the bridge has gone {@code OFFLINE} after {@code MAX_CONSECUTIVE_POLL_FAILURES}, further
+     * consecutive failures during the same outage must not re-trigger the transition - {@code pollOnce()}
+     * guards it on the thing's current status specifically so this does not happen. Without that guard,
+     * every poll past the fifth failure re-logged "Bridge going OFFLINE" and re-published a status update
+     * (with an ever-growing failure count in the message, so each one was a distinct
+     * {@code ThingStatusInfo} rather than a no-op), which is exactly the noisy behaviour observed live
+     * during a sustained outage.
+     */
+    @Test
+    public void repeatedPollFailuresPastTheThresholdDoNotReTriggerTheOfflineTransition() throws Exception {
+        invokeAuthenticate();
+
+        for (int i = 0; i < 7; i++) {
+            fakeServer.injectTimeout();
+            invokePoll();
+        }
+
+        verify(callback, times(1)).statusUpdated(eq(bridge), argThat(info -> info.getStatus() == ThingStatus.OFFLINE
                 && info.getStatusDetail() == ThingStatusDetail.COMMUNICATION_ERROR));
     }
 

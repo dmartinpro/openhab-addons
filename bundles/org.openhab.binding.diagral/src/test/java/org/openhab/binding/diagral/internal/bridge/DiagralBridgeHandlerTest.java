@@ -745,6 +745,53 @@ public class DiagralBridgeHandlerTest {
         assertThat(handler.isGroupActive("1", tempo), is(false));
     }
 
+    /**
+     * activateGroups(List) activates several groups in one call and records every one of them in the
+     * locally-tracked fallback set, the same way the single-group activateGroup(String) does for one.
+     */
+    @Test
+    public void activateGroupsTracksEveryGroupLocally() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        handler.activateGroups(List.of("1", "3"));
+
+        verify(diagralHttpClient, times(1)).activateGroups(List.of("1", "3"));
+        DiagralPollSnapshot tempo = snapshot("TEMPO_GROUP", null, List.of());
+        assertThat(handler.isGroupActive("1", tempo), is(true));
+        assertThat(handler.isGroupActive("3", tempo), is(true));
+        assertThat(handler.isGroupActive("2", tempo), is(false));
+    }
+
+    /** Same as {@link #activateGroupsTracksEveryGroupLocally()}, for disableGroups(List). */
+    @Test
+    public void disableGroupsUntracksEveryGroupLocally() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+        handler.activateGroups(List.of("1", "2", "3"));
+
+        handler.disableGroups(List.of("1", "3"));
+
+        verify(diagralHttpClient, times(1)).disableGroups(List.of("1", "3"));
+        DiagralPollSnapshot tempo = snapshot("TEMPO_GROUP", null, List.of());
+        assertThat(handler.isGroupActive("1", tempo), is(false));
+        assertThat(handler.isGroupActive("2", tempo), is(true));
+        assertThat(handler.isGroupActive("3", tempo), is(false));
+    }
+
+    /**
+     * A failure from the multi-group endpoint still triggers the same re-poll-regardless-of-outcome
+     * behaviour as every other command (see {@code DiagralBridgeHandler.command}) - it must not leave the
+     * bridge polling stopped.
+     */
+    @Test
+    public void activateGroupsStillRePollsOnFailure() throws Exception {
+        doThrow(new DiagralException("Request timeout")).when(diagralHttpClient).activateGroups(anyList());
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        handler.activateGroups(List.of("1", "2"));
+
+        verify(diagralHttpClient, timeout(1000).times(1)).getSystemStatus();
+    }
+
     /** LEARNING_MODE is not an armed state and has no per-group detail; it uses the same fallback. */
     @Test
     public void learningModeUsesTheFallback() {

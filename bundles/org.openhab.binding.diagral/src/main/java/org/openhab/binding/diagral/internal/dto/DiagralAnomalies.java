@@ -38,30 +38,39 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralAnomalies {
 
+    /** When this anomalies snapshot was generated server-side. */
     @SerializedName("created_at")
     public @Nullable String createdAt;
 
+    /** Anomalies reported for sensors (motion/contact), or {@code null} if none. */
     @SerializedName("sensors")
     public @Nullable List<DiagralAnomalyDetail> sensors;
 
+    /** Anomalies reported for badges, or {@code null} if none. */
     @SerializedName("badges")
     public @Nullable List<DiagralAnomalyDetail> badges;
 
+    /** Anomalies reported for sirens, or {@code null} if none. */
     @SerializedName("sirens")
     public @Nullable List<DiagralAnomalyDetail> sirens;
 
+    /** Anomalies reported for cameras, or {@code null} if none. */
     @SerializedName("cameras")
     public @Nullable List<DiagralAnomalyDetail> cameras;
 
+    /** Anomalies reported for keypads (the API's "commands" category), or {@code null} if none. */
     @SerializedName("commands")
     public @Nullable List<DiagralAnomalyDetail> commands;
 
+    /** Anomalies reported for transceivers, or {@code null} if none. */
     @SerializedName("transceivers")
     public @Nullable List<DiagralAnomalyDetail> transceivers;
 
+    /** Anomalies reported for transmitters (including plugs), or {@code null} if none. */
     @SerializedName("transmitters")
     public @Nullable List<DiagralAnomalyDetail> transmitters;
 
+    /** Anomalies reported for the central unit itself, or {@code null} if none. */
     @SerializedName("central")
     public @Nullable List<DiagralAnomalyDetail> central;
 

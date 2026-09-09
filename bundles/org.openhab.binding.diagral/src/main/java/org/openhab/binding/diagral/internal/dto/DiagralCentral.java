@@ -36,27 +36,35 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralCentral {
 
+    /** Whether the central unit has a communication plug/module installed. */
     @SerializedName("hasPlug")
     public @Nullable Boolean hasPlug;
 
+    /** Whether a GSM communication plug is installed. */
     @SerializedName("plugGSM")
     public @Nullable Boolean plugGSM;
 
+    /** Whether an RTC (phone line) communication plug is installed. */
     @SerializedName("plugRTC")
     public @Nullable Boolean plugRTC;
 
+    /** Whether an ADSL communication plug is installed. */
     @SerializedName("plugADSL")
     public @Nullable Boolean plugADSL;
 
+    /** Whether a relay card is installed. */
     @SerializedName("relayCard")
     public @Nullable Boolean relayCard;
 
+    /** Whether this central unit can be inhibited. */
     @SerializedName("canInhibit")
     public @Nullable Boolean canInhibit;
 
+    /** Whether GSM parameters have been saved for this central unit. */
     @SerializedName("parameterGsmSaved")
     public @Nullable Boolean parameterGsmSaved;
 
+    /** Central-unit-level anomaly flags, keyed by alert name (e.g. {@code mainPowerSupplyAlert}). */
     @SerializedName("anomalies")
     public @Nullable Map<String, Boolean> anomalies;
 }

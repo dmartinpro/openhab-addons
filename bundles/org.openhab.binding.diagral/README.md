@@ -33,6 +33,34 @@ Once you configure and initialize the Diagral Bridge with valid credentials, the
 Discovered devices will appear in the inbox and can be added with a single click.
 The discovery process runs when the bridge comes online and can be manually triggered through the UI.
 
+## Semantic Model
+
+Every thing type carries a [semantic Equipment tag](https://www.openhab.org/docs/concepts/semantics.html), so
+things and their key channels are automatically classified once linked to items:
+
+| Thing            | Equipment tag |
+|-------------------|---------------|
+| `alarm-system`     | `AlarmSystem` |
+| `group`            | `AlarmZone`   |
+| `motion-sensor`    | `MotionDetector` |
+| `contact-sensor`   | `ContactSensor` |
+| `siren`            | `Siren`       |
+| `keypad`           | `Keypad`      |
+| `plug`             | `PowerOutlet` |
+| `transmitter`      | `AlarmDevice` |
+| `camera`           | `Camera`      |
+
+This is what lets Main UI's **Settings → Equipment → Add Equipment from Thing** wizard build a fully-organized
+Equipment/Point item structure straight from a thing's channels — including, for `group` things, a
+plain `Group` item you get for free per zone. To get one `Group` item per zone that a rule or widget can
+iterate with `.members` (e.g. "how many zones exist"), add each `group` thing as Equipment this way, or link
+its channels under a manually-created `Group` item of your own — the binding does not create or manage any
+`Item` itself, only these tags. Individual channels are also tagged where a Point/Property classification
+applies cleanly (e.g. `mode-control` as `Control`+`Mode`, `active`/`group-active` as `Switch`,
+`armed-status`/`group-status` as `Status`, `enabled` as `Switch`+`Enabled`) — see the [openHAB Model
+tab](https://www.openhab.org/docs/tutorial/model.html) to browse the resulting structure once things are
+linked.
+
 ## Binding Configuration
 
 This binding does not require any binding-level configuration.
@@ -97,6 +125,8 @@ If you need to manually configure one:
 | anomalies-present | Switch | Read Only  | Indicates if any anomalies are present in the system           |
 | anomaly-count     | Number | Read Only  | Number of active anomalies in the system                       |
 | central-low-battery | Switch | Read Only | ON when the central unit reports a main or backup power supply alert |
+| activate-groups   | String | Write Only | Activates several device groups in one call — command value is a comma-separated list of numeric group IDs (e.g. `"1,3,5"`), sent to the Diagral API in a single request |
+| disable-groups    | String | Write Only | Disables several device groups in one call — same comma-separated group ID list as `activate-groups` |
 
 #### `armed-status` values
 
@@ -151,10 +181,11 @@ them by itself, and there is no command that produces them.
 
 ### Device Group Channels
 
-| Channel | Type   | Read/Write | Description                          |
-|---------|--------|------------|--------------------------------------|
-| active  | Switch | Read/Write | Group activation state (ON/OFF)      |
-| status  | String | Read Only  | Group status description             |
+| Channel  | Type   | Read/Write | Description                                                          |
+|----------|--------|------------|-----------------------------------------------------------------------|
+| active   | Switch | Read/Write | Group activation state (ON/OFF)                                       |
+| status   | String | Read Only  | Group status description                                              |
+| group-id | Number | Read Only  | The group's own numeric Diagral identifier, mirroring the `groupId` configuration parameter — useful for building the group ID lists that `activate-groups`/`disable-groups` (see the `alarm-system` channel table above) expect |
 
 ## Full Example
 

@@ -14,6 +14,9 @@ package org.openhab.binding.diagral.internal.handler;
 
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
 import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
@@ -45,6 +48,8 @@ import org.slf4j.LoggerFactory;
  * <li>{@code mode-control} - Command channel to change the system mode</li>
  * <li>{@code anomalies-present} - Switch indicating if any anomalies are present</li>
  * <li>{@code anomaly-count} - Number of active anomalies</li>
+ * <li>{@code activate-groups} - Command channel to activate several device groups at once</li>
+ * <li>{@code disable-groups} - Command channel to disable several device groups at once</li>
  * </ul>
  * </p>
  *
@@ -82,8 +87,10 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
     }
 
     /**
-     * Handles commands sent to this system's channels: {@link RefreshType} triggers a status refresh, and
-     * a {@code StringType} on {@code mode-control} sets the alarm system mode via the bridge.
+     * Handles commands sent to this system's channels: {@link RefreshType} triggers a status refresh, a
+     * {@code StringType} on {@code mode-control} sets the alarm system mode via the bridge, and a
+     * {@code StringType} on {@code activate-groups}/{@code disable-groups} activates/disables the
+     * comma-separated group IDs it carries, in one call each, via the bridge.
      *
      * @param channelUID the channel the command targets
      * @param command the command received
@@ -100,6 +107,10 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
         if (CHANNEL_MODE_CONTROL.equals(channelId) && command instanceof StringType) {
             String mode = command.toString();
             setSystemMode(mode);
+        } else if (CHANNEL_ACTIVATE_GROUPS.equals(channelId) && command instanceof StringType) {
+            activateGroups(command.toString());
+        } else if (CHANNEL_DISABLE_GROUPS.equals(channelId) && command instanceof StringType) {
+            disableGroups(command.toString());
         }
     }
 
@@ -117,6 +128,74 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
 
         logger.debug("Setting system mode to: {}", mode);
         bridgeHandler.setSystemMode(mode);
+    }
+
+    /**
+     * Activates several device groups in one call, in response to the {@code activate-groups} channel.
+     *
+     * @param groupIdsCsv the group IDs to activate, comma-separated (e.g. {@code "1,3,5"})
+     */
+    private void activateGroups(String groupIdsCsv) {
+        DiagralBridgeHandler bridgeHandler = getBridgeHandler();
+        if (bridgeHandler == null) {
+            logger.warn("Cannot activate groups - bridge handler not available");
+            return;
+        }
+
+        List<String> groupIds = parseGroupIds(groupIdsCsv);
+        if (groupIds.isEmpty()) {
+            logger.warn("Cannot activate groups - no group IDs in command: {}", groupIdsCsv);
+            return;
+        }
+
+        logger.debug("Activating groups: {}", groupIds);
+        bridgeHandler.activateGroups(groupIds);
+    }
+
+    /**
+     * Disables several device groups in one call, in response to the {@code disable-groups} channel.
+     *
+     * @param groupIdsCsv the group IDs to disable, comma-separated (e.g. {@code "1,3,5"})
+     */
+    private void disableGroups(String groupIdsCsv) {
+        DiagralBridgeHandler bridgeHandler = getBridgeHandler();
+        if (bridgeHandler == null) {
+            logger.warn("Cannot disable groups - bridge handler not available");
+            return;
+        }
+
+        List<String> groupIds = parseGroupIds(groupIdsCsv);
+        if (groupIds.isEmpty()) {
+            logger.warn("Cannot disable groups - no group IDs in command: {}", groupIdsCsv);
+            return;
+        }
+
+        logger.debug("Disabling groups: {}", groupIds);
+        bridgeHandler.disableGroups(groupIds);
+    }
+
+    /**
+     * Parses a comma-separated list of group IDs, e.g. {@code "1, 3,5"}, as sent to the
+     * {@code activate-groups}/{@code disable-groups} channels.
+     *
+     * <p>
+     * Whitespace around each entry is trimmed and empty entries (e.g. from a trailing comma) are dropped.
+     * Numeric validation of each remaining entry happens downstream, in {@code DiagralHttpClient}'s
+     * request-building code, since that is the one place that actually knows the API's requirements.
+     * </p>
+     *
+     * @param groupIdsCsv the raw command string
+     * @return the individual group IDs, trimmed, with empty entries removed
+     */
+    private List<String> parseGroupIds(String groupIdsCsv) {
+        List<String> groupIds = new ArrayList<>();
+        for (String groupId : groupIdsCsv.split(",")) {
+            String trimmed = groupId.trim();
+            if (!trimmed.isEmpty()) {
+                groupIds.add(trimmed);
+            }
+        }
+        return groupIds;
     }
 
     /**

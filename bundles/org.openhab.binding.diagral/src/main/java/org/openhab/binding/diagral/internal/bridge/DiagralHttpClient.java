@@ -461,11 +461,27 @@ public class DiagralHttpClient {
      * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
      */
     public void activateGroup(String groupId) throws DiagralException {
+        activateGroups(List.of(groupId));
+    }
+
+    /**
+     * Activates several device groups in a single request.
+     *
+     * <p>
+     * The real API accepts a multi-element {@code groups} array (see {@link #buildGroupsPayload}), so this
+     * applies to every group in {@code groupIds} atomically from the caller's point of view - one HTTP
+     * call, one immediate response - rather than issuing one {@link #activateGroup(String)} call per group.
+     * </p>
+     *
+     * @param groupIds the group IDs to activate
+     * @throws DiagralException if the request fails, or if any element of {@code groupIds} isn't numeric
+     */
+    public void activateGroups(List<String> groupIds) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_ACTIVATE_GROUP;
-        String payload = buildGroupsPayload(groupId);
+        String payload = buildGroupsPayload(groupIds);
         String responseBody = executePost(endpoint, payload, true);
-        logger.debug("Group {} activated", groupId);
-        logImmediateStatus("activateGroup(" + groupId + ")", responseBody);
+        logger.debug("Groups {} activated", groupIds);
+        logImmediateStatus("activateGroups(" + groupIds + ")", responseBody);
     }
 
     /**
@@ -476,11 +492,22 @@ public class DiagralHttpClient {
      * @throws DiagralException if the request fails, or if {@code groupId} isn't numeric
      */
     public void disableGroup(String groupId) throws DiagralException {
+        disableGroups(List.of(groupId));
+    }
+
+    /**
+     * Disables several device groups in a single request. See {@link #activateGroups(List)} - same
+     * one-call-for-many-groups reasoning applies to disabling.
+     *
+     * @param groupIds the group IDs to disable
+     * @throws DiagralException if the request fails, or if any element of {@code groupIds} isn't numeric
+     */
+    public void disableGroups(List<String> groupIds) throws DiagralException {
         String endpoint = API_ENDPOINT_SYSTEMS + "/" + authManager.getSerialId() + API_ENDPOINT_DISABLE_GROUP;
-        String payload = buildGroupsPayload(groupId);
+        String payload = buildGroupsPayload(groupIds);
         String responseBody = executePost(endpoint, payload, true);
-        logger.debug("Group {} disabled", groupId);
-        logImmediateStatus("disableGroup(" + groupId + ")", responseBody);
+        logger.debug("Groups {} disabled", groupIds);
+        logImmediateStatus("disableGroups(" + groupIds + ")", responseBody);
     }
 
     /**
@@ -519,22 +546,31 @@ public class DiagralHttpClient {
      * The real API rejects the (previously used) {@code {"group_id":"<string>"}} shape with a 422
      * validation error - it requires {@code {"groups":[<int>,...]}}, a JSON array of numeric group
      * indices (confirmed against pydiagral's {@code __action_group_system}, and against a live 422
-     * response from the real API: {@code "loc":["body","groups"],"msg":"Field required"}). This binding
-     * only ever activates/disables one group at a time (one openHAB Thing per group), so the array always
-     * has exactly one element.
+     * response from the real API: {@code "loc":["body","groups"],"msg":"Field required"}). The array
+     * accepts any number of elements - a single openHAB group Thing passes a one-element list (see
+     * {@link #activateGroup(String)}/{@link #disableGroup(String)}), while the {@code activate-groups}/
+     * {@code disable-groups} alarm-system channels pass several at once so multiple groups are
+     * activated/disabled in one HTTP call instead of one call per group.
      * </p>
      *
-     * @param groupId the group ID (must be numeric - this is the Diagral group index as a string)
-     * @return the JSON request body, e.g. {@code {"groups":[3]}}
-     * @throws DiagralApiException if {@code groupId} isn't a valid integer
+     * @param groupIds the group IDs (each must be numeric - the Diagral group index as a string),
+     *            in the order they should appear in the request
+     * @return the JSON request body, e.g. {@code {"groups":[3]}} or {@code {"groups":[1,3,5]}}
+     * @throws DiagralApiException if any element of {@code groupIds} isn't a valid integer
      */
-    private String buildGroupsPayload(String groupId) throws DiagralApiException {
-        try {
-            int groupIndex = Integer.parseInt(groupId);
-            return "{\"groups\":[" + groupIndex + "]}";
-        } catch (NumberFormatException e) {
-            throw new DiagralApiException("Invalid group ID (must be numeric): " + groupId, 0);
+    private String buildGroupsPayload(List<String> groupIds) throws DiagralApiException {
+        StringBuilder indices = new StringBuilder();
+        for (String groupId : groupIds) {
+            try {
+                if (indices.length() > 0) {
+                    indices.append(',');
+                }
+                indices.append(Integer.parseInt(groupId));
+            } catch (NumberFormatException e) {
+                throw new DiagralApiException("Invalid group ID (must be numeric): " + groupId, 0);
+            }
         }
+        return "{\"groups\":[" + indices + "]}";
     }
 
     /**
@@ -562,8 +598,9 @@ public class DiagralHttpClient {
     /**
      * Performs an enable/disable action on a device.
      *
-     * @param actionEndpoint the action endpoint suffix ({@link #API_ENDPOINT_ENABLE} or
-     *            {@link #API_ENDPOINT_DISABLE})
+     * @param actionEndpoint the action endpoint suffix ({@code API_ENDPOINT_ENABLE} or
+     *            {@code API_ENDPOINT_DISABLE} from
+     *            {@link org.openhab.binding.diagral.internal.DiagralBindingConstants})
      * @param type the product type
      * @param productId the per-category numeric device index
      * @throws DiagralException if the request fails and the resulting device state could not be

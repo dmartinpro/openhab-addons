@@ -38,49 +38,67 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralDevice {
 
+    /** The device's unique ID; only present for sensors - see {@link #getUniqueId()}. */
     @SerializedName("uid")
     public @Nullable String id;
 
+    /** The device's category-level type string. */
     @SerializedName("type")
     public @Nullable String type;
 
+    /** The device's product range/family. */
     @SerializedName("gamme")
     public @Nullable String gamme;
 
+    /** The device's refCode-derived subtype, used to classify sensors during discovery. */
     @SerializedName("subtype")
     public @Nullable String subtype;
 
+    /** The device's configured label/name. */
     @SerializedName("label")
     public @Nullable String name;
 
     // NOTE: refCode appears in serialId. SerialId format is ....XXXX...... where XXXX is refCode
+    /** The device's hardware reference code, used to classify sensors during discovery. */
     @SerializedName("refCode")
     public @Nullable String refCode;
 
+    /** Whether the device is currently inhibited (disabled). */
     @SerializedName("inhibited")
     public boolean inhibited;
 
+    /** Whether this device supports being inhibited/enabled at all. */
     @SerializedName("canInhibit")
     public boolean canInhibit;
 
+    /** The numeric index of the group this device belongs to. */
     @SerializedName("group")
     public @Nullable Integer groupIndex;
 
+    /** The device's per-category numeric index, used for enable/disable API calls. */
     @SerializedName("index")
     public @Nullable Integer deviceIndex;
 
+    /**
+     * The device's serial number; the only identifier for sirens, keypads and transmitters - see
+     * {@link #getUniqueId()}.
+     */
     @SerializedName("serial")
     public @Nullable String serial;
 
+    /** Per-device anomaly flags, keyed by alert name (e.g. {@code powerSupplyAlert}). */
     @SerializedName("anomalies")
     public @Nullable Map<String, Boolean> anomalies;
 
+    /** Whether this transmitter is a smart plug, distinguishing the {@code plug} thing type from a generic one. */
     @SerializedName("isPlug")
     public @Nullable Boolean isPlug;
 
+    /** Whether this device is a video-capable camera. */
     @SerializedName("isVideo")
     public @Nullable Boolean isVideo;
 
+    /** The date this device was installed. */
     @SerializedName("installationDate")
     public @Nullable String installationDate;
 

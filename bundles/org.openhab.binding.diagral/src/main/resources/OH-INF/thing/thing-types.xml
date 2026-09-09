@@ -19,6 +19,7 @@
 
 		<label>Diagral Alarm System</label>
 		<description>Main alarm system control and status</description>
+		<semantic-equipment-tag>AlarmSystem</semantic-equipment-tag>
 
 		<channels>
 			<channel id="armed-status" typeId="armed-status"/>
@@ -26,6 +27,8 @@
 			<channel id="anomalies-present" typeId="anomalies-present"/>
 			<channel id="anomaly-count" typeId="anomaly-count"/>
 			<channel id="central-low-battery" typeId="system.low-battery"/>
+			<channel id="activate-groups" typeId="group-batch-activate"/>
+			<channel id="disable-groups" typeId="group-batch-disable"/>
 		</channels>
 
 		<representation-property>serialId</representation-property>
@@ -39,6 +42,7 @@
 
 		<label>Diagral Motion Sensor</label>
 		<description>Motion detection sensor</description>
+		<semantic-equipment-tag>MotionDetector</semantic-equipment-tag>
 
 		<channels>
 			<channel id="motion" typeId="system.motion"/>
@@ -59,6 +63,7 @@
 
 		<label>Diagral Contact Sensor</label>
 		<description>Contact/door sensor</description>
+		<semantic-equipment-tag>ContactSensor</semantic-equipment-tag>
 
 		<channels>
 			<channel id="contact" typeId="system.contact"/>
@@ -79,6 +84,7 @@
 
 		<label>Diagral Siren</label>
 		<description>Siren</description>
+		<semantic-equipment-tag>Siren</semantic-equipment-tag>
 
 		<channels>
 			<channel id="enabled" typeId="device-enabled"/>
@@ -97,6 +103,7 @@
 
 		<label>Diagral Keypad</label>
 		<description>Keypad</description>
+		<semantic-equipment-tag>Keypad</semantic-equipment-tag>
 
 		<channels>
 			<channel id="enabled" typeId="device-enabled"/>
@@ -115,6 +122,7 @@
 
 		<label>Diagral Plug</label>
 		<description>Smart plug</description>
+		<semantic-equipment-tag>PowerOutlet</semantic-equipment-tag>
 
 		<channels>
 			<channel id="enabled" typeId="device-enabled"/>
@@ -133,6 +141,7 @@
 
 		<label>Diagral Transmitter</label>
 		<description>Generic radio transmitter (not individually controllable via the Diagral API)</description>
+		<semantic-equipment-tag>AlarmDevice</semantic-equipment-tag>
 
 		<channels>
 			<channel id="enabled" typeId="device-enabled-readonly"/>
@@ -152,6 +161,7 @@
 		<label>Diagral Camera</label>
 		<description>Camera (inventory/status only - no image or video access via the Diagral API used by this
 			binding)</description>
+		<semantic-equipment-tag>Camera</semantic-equipment-tag>
 
 		<channels>
 			<channel id="enabled" typeId="device-enabled-readonly"/>
@@ -170,10 +180,12 @@
 
 		<label>Diagral Device Group</label>
 		<description>Group of devices that can be controlled together</description>
+		<semantic-equipment-tag>AlarmZone</semantic-equipment-tag>
 
 		<channels>
 			<channel id="active" typeId="group-active"/>
 			<channel id="status" typeId="group-status"/>
+			<channel id="group-id" typeId="group-id"/>
 		</channels>
 
 		<representation-property>groupId</representation-property>
@@ -186,6 +198,9 @@
 		<item-type>String</item-type>
 		<label>Armed Status</label>
 		<description>Current armed status of the alarm system</description>
+		<tags>
+			<tag>Status</tag>
+		</tags>
 		<state readOnly="true">
 			<options>
 				<option value="OFF">Off</option>
@@ -206,6 +221,10 @@
 		<item-type>String</item-type>
 		<label>Mode Control</label>
 		<description>Control the alarm system mode</description>
+		<tags>
+			<tag>Control</tag>
+			<tag>Mode</tag>
+		</tags>
 		<command>
 			<options>
 				<option value="OFF">Disarm</option>
@@ -231,10 +250,30 @@
 		<state readOnly="true"/>
 	</channel-type>
 
+	<channel-type id="group-batch-activate" advanced="true">
+		<item-type>String</item-type>
+		<label>Activate Groups</label>
+		<description>Activates several device groups at once. Command value is a comma-separated list of
+			numeric group IDs
+			(e.g. "1,3,5"), sent to the Diagral API in a single request.</description>
+	</channel-type>
+
+	<channel-type id="group-batch-disable" advanced="true">
+		<item-type>String</item-type>
+		<label>Disable Groups</label>
+		<description>Disables several device groups at once. Command value is a comma-separated list of
+			numeric group IDs (e.g.
+			"1,3,5"), sent to the Diagral API in a single request.</description>
+	</channel-type>
+
 	<channel-type id="device-enabled">
 		<item-type>Switch</item-type>
 		<label>Device Enabled</label>
 		<description>Enables/disables (un-inhibits/inhibits) the device</description>
+		<tags>
+			<tag>Switch</tag>
+			<tag>Enabled</tag>
+		</tags>
 	</channel-type>
 
 	<channel-type id="device-enabled-readonly">
@@ -242,6 +281,10 @@
 		<label>Device Enabled</label>
 		<description>Indicates if the device is enabled (this device type has no enable/disable action in the
 			Diagral API)</description>
+		<tags>
+			<tag>Switch</tag>
+			<tag>Enabled</tag>
+		</tags>
 		<state readOnly="true"/>
 	</channel-type>
 
@@ -249,13 +292,28 @@
 		<item-type>Switch</item-type>
 		<label>Group Active</label>
 		<description>Group activation state</description>
+		<tags>
+			<tag>Switch</tag>
+		</tags>
 	</channel-type>
 
 	<channel-type id="group-status">
 		<item-type>String</item-type>
 		<label>Group Status</label>
 		<description>Group status description</description>
+		<tags>
+			<tag>Status</tag>
+		</tags>
 		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="group-id">
+		<item-type>Number</item-type>
+		<label>Group ID</label>
+		<description>The Diagral group's own numeric identifier, as assigned in the Diagral installer app. Used to
+			target this
+			group in activate-groups/disable-groups batch commands.</description>
+		<state readOnly="true" pattern="%d"/>
 	</channel-type>
 
 </thing:thing-descriptions>

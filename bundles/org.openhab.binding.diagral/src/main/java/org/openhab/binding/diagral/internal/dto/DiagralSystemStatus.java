@@ -38,9 +38,14 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralSystemStatus {
 
+    /** One of the arm-mode constants in {@code DiagralBindingConstants} (e.g. {@code MODE_OFF}, {@code MODE_FULL}). */
     @SerializedName("status")
     public @Nullable String status;
 
+    /**
+     * Group indices currently armed - only reliably populated while {@code status} is the settled {@code GROUP}
+     * state; unreliable otherwise (see this class's Javadoc).
+     */
     @SerializedName("activated_groups")
     public @Nullable List<Integer> activatedGroups;
 }

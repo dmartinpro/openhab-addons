@@ -183,6 +183,17 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     private final AtomicInteger consecutivePollFailures = new AtomicInteger();
 
     /**
+     * Set once {@link #pollOnce()} has flipped the bridge {@code OFFLINE} for reaching {@link
+     * #MAX_CONSECUTIVE_POLL_FAILURES}, so that the transition (its warning log and {@code updateStatus()}
+     * call) fires only once per outage rather than on every subsequent failed poll. Reset to {@code false}
+     * alongside {@link #consecutivePollFailures} whenever a poll succeeds. Deliberately a dedicated flag
+     * rather than checking {@code getThing().getStatus()}: the latter only reflects reality once the
+     * framework has processed the {@code updateStatus()} callback, which this handler cannot observe
+     * directly (and does not happen at all in a unit test that mocks the callback).
+     */
+    private volatile boolean offlineDueToPollFailures;
+
+    /**
      * Serialises {@link #poll()}.
      *
      * <p>
@@ -334,6 +345,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         // never come back online after a config change.
         disposed = false;
         consecutivePollFailures.set(0);
+        offlineDueToPollFailures = false;
         consecutiveBackoffFailures.set(0);
         backoffUntilMillis = 0;
 
@@ -525,24 +537,6 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Polls the Diagral API for status updates.
-     *
-     * <p>
-     * Runs on {@code scheduler} at the configured {@code refreshInterval} (see {@link
-     * #startPolling(int)}), and is also triggered immediately, off-cycle, after any command that
-     * changes device/system state (e.g. {@link #setSystemMode}, {@link #enableDevice}) so the UI
-     * reflects the change promptly rather than waiting for the next scheduled tick. On success, resets
-     * {@link #consecutivePollFailures}, keeps the bridge {@code ONLINE}, and calls {@link
-     * #refreshChildHandlers}. On an authentication failure, schedules a re-authentication attempt
-     * rather than going offline immediately (this doesn't touch {@link #consecutivePollFailures}, which
-     * only tracks plain failures - see that field's Javadoc). On any other failure, logs a warning and
-     * increments {@link #consecutivePollFailures}; a single failed poll still doesn't flip the bridge
-     * offline (this API's transient flakiness usually self-heals within 1-3 cycles), but reaching {@link
-     * #MAX_CONSECUTIVE_POLL_FAILURES} in a row does, so a genuinely sustained outage doesn't leave the
-     * bridge silently {@code ONLINE} forever.
-     * </p>
-     */
-    /**
      * The scheduled polling tick: honours any active backoff, then polls.
      *
      * <p>
@@ -564,6 +558,14 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         poll();
     }
 
+    /**
+     * Entry point for every poll, whether triggered by the schedule or by a command's follow-up re-poll.
+     *
+     * <p>
+     * A no-op once {@link #disposed}. Otherwise serialises against any other in-flight poll before
+     * delegating to {@link #pollOnce()} - see {@link #pollLock}'s Javadoc for why that lock exists.
+     * </p>
+     */
     private void poll() {
         if (disposed) {
             return;
@@ -581,6 +583,21 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     /**
      * Performs one poll cycle. Only ever called by {@link #poll()}, which holds {@link #pollLock} for the
      * duration, so this method can assume it is the only poll running.
+     *
+     * <p>
+     * On success, resets {@link #consecutivePollFailures}, keeps the bridge {@code ONLINE}, and calls
+     * {@link #refreshChildHandlers}. On an authentication failure, schedules a re-authentication attempt
+     * rather than going offline immediately (this doesn't touch {@link #consecutivePollFailures}, which
+     * only tracks plain failures - see that field's Javadoc). On any other failure, logs a warning and
+     * increments {@link #consecutivePollFailures}; a single failed poll still doesn't flip the bridge
+     * offline (this API's transient flakiness usually self-heals within 1-3 cycles), but reaching {@link
+     * #MAX_CONSECUTIVE_POLL_FAILURES} in a row does. That transition - the warning log and the
+     * {@link ThingStatus#OFFLINE} update - fires only once, guarded by the thing's current status, rather
+     * than repeating on every poll for as long as the outage continues: without that guard, a sustained
+     * outage logged "Bridge going OFFLINE" (and re-published the same status) on every single failed poll
+     * past the fifth, which is what a genuinely sustained outage looked like in practice before this
+     * guard was added.
+     * </p>
      */
     private void pollOnce() {
         DiagralHttpClient client = diagralHttpClient;
@@ -594,6 +611,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             DiagralSystemStatus status = fetchAndCacheSystemStatus(client);
             logger.trace("System status retrieved: {}", status.status);
             consecutivePollFailures.set(0);
+            offlineDueToPollFailures = false;
             clearBackoff();
 
             // Ensure bridge stays online
@@ -623,7 +641,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
                 applyBackoff(apiException.getStatusCode());
             }
             int failures = consecutivePollFailures.incrementAndGet();
-            if (failures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            if (failures >= MAX_CONSECUTIVE_POLL_FAILURES && !offlineDueToPollFailures) {
+                offlineDueToPollFailures = true;
                 logger.warn("Bridge going OFFLINE after {} consecutive poll failures", failures);
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
                         failures + " consecutive poll failures - last error: " + e.getMessage());
@@ -1122,6 +1141,26 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
+     * Activates several device groups in a single request.
+     *
+     * <p>
+     * Called by {@code DiagralSystemHandler} in response to a command on the alarm system's
+     * {@code activate-groups} channel. Unlike {@link #activateGroup(String)}, this is not tied to any one
+     * group's Thing - it exists so multiple groups can be armed together in one HTTP call (see
+     * {@link DiagralHttpClient#activateGroups(List)}) instead of one call per group. On success, also
+     * records every ID in {@code groupIds} in {@link #activeGroupIds} - see that field's Javadoc for why.
+     * </p>
+     *
+     * @param groupIds the group IDs to activate
+     */
+    public void activateGroups(List<String> groupIds) {
+        command("activate groups " + groupIds, client -> {
+            client.activateGroups(groupIds);
+            activeGroupIds.addAll(groupIds);
+        });
+    }
+
+    /**
      * Disables a device group.
      *
      * <p>
@@ -1136,6 +1175,20 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         command("disable group " + groupId, client -> {
             client.disableGroup(groupId);
             activeGroupIds.remove(groupId);
+        });
+    }
+
+    /**
+     * Disables several device groups in a single request. See {@link #activateGroups(List)} - same
+     * one-call-for-many-groups reasoning applies to disabling, called from the alarm system's
+     * {@code disable-groups} channel.
+     *
+     * @param groupIds the group IDs to disable
+     */
+    public void disableGroups(List<String> groupIds) {
+        command("disable groups " + groupIds, client -> {
+            client.disableGroups(groupIds);
+            activeGroupIds.removeAll(groupIds);
         });
     }
 

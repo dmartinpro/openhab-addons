@@ -35,18 +35,23 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralAnomalyDetail {
 
+    /** The affected device's serial number. */
     @SerializedName("serial")
     public @Nullable String serial;
 
+    /** The affected device's per-category numeric index, matched against {@code DiagralDevice#deviceIndex}. */
     @SerializedName("index")
     public @Nullable Integer deviceIndex;
 
+    /** The numeric index of the group this device belongs to. */
     @SerializedName("group")
     public @Nullable Integer groupIndex;
 
+    /** The affected device's human-readable label. */
     @SerializedName("label")
     public @Nullable String label;
 
+    /** The specific anomaly codes reported for this device. */
     @SerializedName("anomaly_names")
     public @Nullable List<DiagralAnomalyName> anomalyNames;
 }

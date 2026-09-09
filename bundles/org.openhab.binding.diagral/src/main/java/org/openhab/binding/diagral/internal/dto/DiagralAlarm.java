@@ -39,12 +39,15 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralAlarm {
 
+    /** The alarm system's configured name. */
     @SerializedName("name")
     public @Nullable String name;
 
+    /** The box (central controller unit)'s identity, used by {@link #getId()} to derive this system's UID. */
     @SerializedName("box")
     public @Nullable Device box;
 
+    /** The central alarm unit's identity. */
     @SerializedName("central")
     public @Nullable Device central;
 
@@ -72,10 +75,13 @@ public class DiagralAlarm {
      */
     @NonNullByDefault
     public static class Device {
+        /** The unit's configured name. */
         @SerializedName("name")
         public @Nullable String name;
+        /** The unit's serial number; {@link DiagralAlarm#getId()} derives this system's UID from it. */
         @SerializedName("serial")
         public @Nullable String serial;
+        /** Firmware versions keyed by component name. */
         @SerializedName("firmwares")
         public @Nullable Map<String, String> firmwares;
     }
