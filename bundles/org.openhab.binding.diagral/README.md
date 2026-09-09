@@ -304,7 +304,7 @@ sitemap diagral label="Diagral Alarm System" {
 
   You may occasionally see log lines like:
 
-  ```
+  ```text
   WARN [internal.bridge.DiagralHttpClient] - Product 1 (SENSOR) action /disable returned HTTP 500 but the resulting device state was verified as applied - treating as a known Diagral API quirk, not a failure
   ```
 
