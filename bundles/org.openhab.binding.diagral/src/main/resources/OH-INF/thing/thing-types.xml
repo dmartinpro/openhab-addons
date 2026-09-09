@@ -256,10 +256,10 @@
 		<description>Open/closed state of the door or window (always UNDEF - the Diagral cloud API exposes no
 			real-time contact
 			state)</description>
-		<state readOnly="true"/>
 		<tags>
 			<tag>OpenState</tag>
 		</tags>
+		<state readOnly="true"/>
 	</channel-type>
 
 	<channel-type id="group-batch-activate" advanced="true">
