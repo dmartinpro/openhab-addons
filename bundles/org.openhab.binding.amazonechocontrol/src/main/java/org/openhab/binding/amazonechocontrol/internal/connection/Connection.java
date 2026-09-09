@@ -47,6 +47,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -56,6 +57,7 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpMethod;
 import org.openhab.binding.amazonechocontrol.internal.AmazonEchoControlBindingConstants;
 import org.openhab.binding.amazonechocontrol.internal.ConnectionException;
 import org.openhab.binding.amazonechocontrol.internal.dto.AscendingAlarmModelTO;
@@ -89,6 +91,7 @@ import org.openhab.binding.amazonechocontrol.internal.dto.response.CustomerHisto
 import org.openhab.binding.amazonechocontrol.internal.dto.response.CustomerHistoryRecordsTO;
 import org.openhab.binding.amazonechocontrol.internal.dto.response.DeviceListTO;
 import org.openhab.binding.amazonechocontrol.internal.dto.response.DeviceNotificationStatesTO;
+import org.openhab.binding.amazonechocontrol.internal.dto.response.DeviceWifiDetailsTO;
 import org.openhab.binding.amazonechocontrol.internal.dto.response.DoNotDisturbDeviceStatusesTO;
 import org.openhab.binding.amazonechocontrol.internal.dto.response.EndpointTO;
 import org.openhab.binding.amazonechocontrol.internal.dto.response.ListItemTO;
@@ -134,6 +137,10 @@ import com.google.gson.JsonObject;
 public class Connection {
     private static final String THING_THREADPOOL_NAME = "thingHandler";
     private static final long EXPIRES_IN = 432000; // five days
+    // Amazon answers /api/notifications with 400 ThrottlingException for the app agent the binding otherwise
+    // sends, and with 200 for a browser agent; a quiet window of hours does not clear the 400.
+    private static final String NOTIFICATIONS_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+            + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
     private final Logger logger = LoggerFactory.getLogger(Connection.class);
 
@@ -145,6 +152,7 @@ public class Connection {
     private CookieManager cookieManager = new CookieManager();
     private final HttpRequestBuilder requestBuilder;
     private @Nullable Date verifyTime;
+    private volatile boolean closed = false;
     private long connectionExpiryTime = 0;
     private long accessTokenExpiryTime = 0;
     private @Nullable String customerName;
@@ -157,6 +165,7 @@ public class Connection {
     private final Map<Integer, Volume> volumes = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Map<String, LinkedBlockingQueue<QueueObject>> devices = Collections
             .synchronizedMap(new LinkedHashMap<>());
+    private final AtomicLong loginGeneration = new AtomicLong();
 
     private final Map<TimerType, ScheduledFuture<?>> timers = new ConcurrentHashMap<>();
     private final Map<TimerType, Lock> locks = new ConcurrentHashMap<>();
@@ -181,8 +190,7 @@ public class Connection {
             this.loginData = new LoginData(cookieManager);
         }
 
-        replaceTimer(TimerType.DEVICES,
-                scheduler.scheduleWithFixedDelay(this::handleExecuteSequenceNode, 0, 500, TimeUnit.MILLISECONDS));
+        ensureSequenceNodeDispatcherIsRunning();
     }
 
     public HttpRequestBuilder getRequestBuilder() {
@@ -215,8 +223,10 @@ public class Connection {
     }
 
     public boolean isSequenceNodeQueueRunning() {
-        return devices.values().stream().anyMatch(
-                (queueObjects) -> (queueObjects.stream().anyMatch(queueObject -> queueObject.future != null)));
+        synchronized (devices) {
+            return devices.values().stream().anyMatch(
+                    (queueObjects) -> (queueObjects.stream().anyMatch(queueObject -> queueObject.future != null)));
+        }
     }
 
     public boolean restoreLogin(@Nullable String data, @Nullable String overloadedDomain) {
@@ -475,7 +485,7 @@ public class Connection {
     }
 
     public boolean verifyLogin() throws ConnectionException {
-        if (this.loginData.getRefreshToken() == null || !tryGetCustomerData()) {
+        if (closed || this.loginData.getRefreshToken() == null || !tryGetCustomerData()) {
             verifyTime = null;
             return false;
         }
@@ -483,7 +493,41 @@ public class Connection {
         if (loginData.getLoginTime() == null) {
             loginData.setLoginTime(verifyTime);
         }
+        ensureSequenceNodeDispatcherIsRunning();
         return true;
+    }
+
+    void ensureSequenceNodeDispatcherIsRunning() {
+        // scheduling inside compute keeps at-most-one-dispatcher atomic; the task never touches timers
+        timers.compute(TimerType.DEVICES, (type, dispatcher) -> {
+            if (closed || isLive(dispatcher)) {
+                return dispatcher;
+            }
+            return scheduler.scheduleWithFixedDelay(this::handleExecuteSequenceNode, 0, 500, TimeUnit.MILLISECONDS);
+        });
+    }
+
+    private static boolean isLive(@Nullable ScheduledFuture<?> dispatcher) {
+        return dispatcher != null && !dispatcher.isCancelled() && !dispatcher.isDone();
+    }
+
+    boolean isSequenceNodeDispatcherRunning() {
+        return isLive(timers.get(TimerType.DEVICES));
+    }
+
+    @Nullable
+    ScheduledFuture<?> sequenceNodeDispatcher() {
+        return timers.get(TimerType.DEVICES);
+    }
+
+    long currentLoginGeneration() {
+        return loginGeneration.get();
+    }
+
+    int queuedSequenceNodeCount() {
+        synchronized (devices) {
+            return devices.values().stream().mapToInt(LinkedBlockingQueue::size).sum();
+        }
     }
 
     // current value in compute can be null
@@ -494,6 +538,15 @@ public class Connection {
             }
             return newTimer;
         });
+    }
+
+    public void close() {
+        closed = true;
+        logout(false);
+    }
+
+    public boolean isClosed() {
+        return closed;
     }
 
     public void logout(boolean reset) {
@@ -513,23 +566,36 @@ public class Connection {
         customerName = null;
         accessToken = null;
 
-        replaceTimer(TimerType.ANNOUNCEMENT, null);
-        announcements.clear();
-        replaceTimer(TimerType.TTS, null);
-        textToSpeeches.clear();
-        replaceTimer(TimerType.VOLUME, null);
-        volumes.clear();
-        replaceTimer(TimerType.DEVICES, null);
-        textCommands.clear();
-        replaceTimer(TimerType.TTS, null);
+        loginGeneration.incrementAndGet();
+        cancelPendingWork(TimerType.ANNOUNCEMENT, announcements::clear);
+        cancelPendingWork(TimerType.TTS, textToSpeeches::clear);
+        cancelPendingWork(TimerType.VOLUME, volumes::clear);
+        cancelPendingWork(TimerType.TEXT_COMMAND, textCommands::clear);
+        cancelPendingWork(TimerType.DEVICES, this::drainDeviceQueues);
+    }
 
-        devices.values().forEach((queueObjects) -> queueObjects.forEach((queueObject) -> {
-            Future<?> future = queueObject.future;
-            if (future != null) {
-                future.cancel(true);
-                queueObject.future = null;
-            }
-        }));
+    private void drainDeviceQueues() {
+        synchronized (devices) {
+            devices.values().forEach((queueObjects) -> queueObjects.forEach((queueObject) -> {
+                Future<?> future = queueObject.future;
+                if (future != null) {
+                    future.cancel(true);
+                    queueObject.future = null;
+                }
+            }));
+            devices.clear();
+        }
+    }
+
+    private void cancelPendingWork(TimerType type, Runnable clearRegistrations) {
+        Lock lock = Objects.requireNonNull(locks.computeIfAbsent(type, k -> new ReentrantLock()));
+        lock.lock();
+        try {
+            replaceTimer(type, null);
+            clearRegistrations.run();
+        } finally {
+            lock.unlock();
+        }
     }
 
     // commands and states
@@ -550,6 +616,22 @@ public class Connection {
         Set<@Nullable String> serialNumbers = ConcurrentHashMap.newKeySet();
         return devices.devices.stream().filter(d -> d.serialNumber != null && serialNumbers.add(d.serialNumber))
                 .toList();
+    }
+
+    public @Nullable String getDeviceMacAddress(DeviceTO device) {
+        String serialNumber = device.serialNumber;
+        String deviceType = device.deviceType;
+        if (serialNumber == null || deviceType == null) {
+            return null;
+        }
+
+        try {
+            return requestBuilder.get(getAlexaServer() + "/api/device-wifi-details?deviceSerialNumber=" + serialNumber
+                    + "&deviceType=" + deviceType).syncSend(DeviceWifiDetailsTO.class).macAddress;
+        } catch (ConnectionException e) {
+            logger.debug("Getting Wi-Fi details failed for device {}", serialNumber, e);
+            return null;
+        }
     }
 
     public Map<String, JsonArray> getSmartHomeDeviceStatesJson(Set<SmartHomeBaseDevice> devices)
@@ -625,19 +707,14 @@ public class Connection {
         return List.of();
     }
 
-    public List<CustomerHistoryRecordTO> getActivities(long startTime, long endTime) {
-        try {
-            String url = getRetailUrl() + "/alexa-privacy/apd/rvh/customer-history-records?startTime=" + startTime
-                    + "&endTime=" + endTime + "&maxRecordSize=1";
-            CustomerHistoryRecordsTO customerHistoryRecords = requestBuilder.get(url)
-                    .syncSend(CustomerHistoryRecordsTO.class);
-            return customerHistoryRecords.customerHistoryRecords.stream()
-                    .filter(r -> !"DEVICE_ARBITRATION".equals(r.utteranceType))
-                    .sorted(Comparator.comparing(r -> r.timestamp)).toList();
-        } catch (ConnectionException e) {
-            logger.info("getting activities failed", e);
-        }
-        return List.of();
+    public List<CustomerHistoryRecordTO> getActivities(long startTime, long endTime) throws ConnectionException {
+        String url = getRetailUrl() + "/alexa-privacy/apd/rvh/customer-history-records?startTime=" + startTime
+                + "&endTime=" + endTime;
+        CustomerHistoryRecordsTO customerHistoryRecords = requestBuilder.get(url)
+                .syncSend(CustomerHistoryRecordsTO.class);
+        return customerHistoryRecords.customerHistoryRecords.stream()
+                .filter(r -> !"DEVICE_ARBITRATION".equals(r.utteranceType))
+                .sorted(Comparator.comparing(r -> r.timestamp)).toList();
     }
 
     public @Nullable NamedListsInfoTO getNamedListInfo(String listId) {
@@ -1019,6 +1096,7 @@ public class Connection {
     private void executeSequenceCommandWithVolume(List<DeviceTO> devices, @Nullable String command,
             Map<String, Object> parameters, List<@Nullable Integer> ttsVolumes,
             List<@Nullable Integer> standardVolumes) {
+        long generation = loginGeneration.get();
         JsonArray serialNodesToExecute = new JsonArray();
 
         JsonArray ttsVolumeNodesToExecute = new JsonArray();
@@ -1073,11 +1151,12 @@ public class Connection {
         }
 
         if (!serialNodesToExecute.isEmpty()) {
-            executeSequenceNodes(devices.stream().map(d -> d.serialNumber).toList(), serialNodesToExecute, false);
+            executeSequenceNodes(devices.stream().map(d -> d.serialNumber).toList(), serialNodesToExecute, false,
+                    generation);
 
             if (!standardVolumeNodesToExecute.isEmpty() && "AlexaAnnouncement".equals(command)) {
                 executeSequenceNodes(devices.stream().map(d -> d.serialNumber).toList(), standardVolumeNodesToExecute,
-                        true);
+                        true, generation);
             }
         }
     }
@@ -1087,11 +1166,12 @@ public class Connection {
     // Alexa.SingASong.Play, Alexa.TellStory.Play, Alexa.Speak (textToSpeach)
     public void executeSequenceCommand(DeviceTO device, String command, Map<String, Object> parameters) {
         JsonObject nodeToExecute = createExecutionNode(device.deviceType, device.serialNumber, command, parameters);
-        executeSequenceNode(List.of(device.serialNumber), nodeToExecute);
+        executeSequenceNode(List.of(device.serialNumber), nodeToExecute, loginGeneration.get());
     }
 
-    private void executeSequenceNode(List<String> serialNumbers, JsonObject nodeToExecute) {
+    void executeSequenceNode(List<String> serialNumbers, JsonObject nodeToExecute, long generation) {
         QueueObject queueObject = new QueueObject();
+        queueObject.generation = generation;
         queueObject.deviceSerialNumbers = serialNumbers;
         queueObject.nodeToExecute = nodeToExecute;
         List<String> serials = new ArrayList<>();
@@ -1105,15 +1185,25 @@ public class Connection {
         logger.debug("Added {} device(s) {} to queue", queueObject.hashCode(), serials);
     }
 
-    private void handleExecuteSequenceNode() {
+    void handleExecuteSequenceNode() {
         Lock lock = Objects.requireNonNull(locks.computeIfAbsent(TimerType.DEVICES, k -> new ReentrantLock()));
         if (lock.tryLock()) {
             try {
-                for (String serialNumber : devices.keySet()) {
+                List<String> serialNumbers;
+                synchronized (devices) {
+                    serialNumbers = List.copyOf(devices.keySet());
+                }
+                for (String serialNumber : serialNumbers) {
                     LinkedBlockingQueue<QueueObject> queueObjects = devices.get(serialNumber);
                     if (queueObjects != null) {
                         QueueObject queueObject = queueObjects.peek();
                         if (queueObject != null) {
+                            if (queueObject.future == null && queueObject.generation != loginGeneration.get()) {
+                                queueObjects.poll();
+                                logger.debug("Dropped {} device(s) {} queued before the last logout",
+                                        queueObject.hashCode(), queueObject.deviceSerialNumbers);
+                                continue;
+                            }
                             Future<?> future = queueObject.future;
                             if (future == null || future.isDone()) {
                                 boolean execute = true;
@@ -1145,6 +1235,8 @@ public class Connection {
                         }
                     }
                 }
+            } catch (RuntimeException e) {
+                logger.warn("Dispatching sequence nodes failed, the dispatcher stays alive", e);
             } finally {
                 lock.unlock();
             }
@@ -1193,7 +1285,8 @@ public class Connection {
         logger.debug("Removed {} device(s) {} from queue", queueObject.hashCode(), serials);
     }
 
-    private void executeSequenceNodes(List<String> serialNumbers, JsonArray nodesToExecute, boolean parallel) {
+    private void executeSequenceNodes(List<String> serialNumbers, JsonArray nodesToExecute, boolean parallel,
+            long generation) {
         JsonObject serialNode = new JsonObject();
         if (parallel) {
             serialNode.addProperty("@type", "com.amazon.alexa.behaviors.model.ParallelNode");
@@ -1203,7 +1296,7 @@ public class Connection {
 
         serialNode.add("nodesToExecute", nodesToExecute);
 
-        executeSequenceNode(serialNumbers, serialNode);
+        executeSequenceNode(serialNumbers, serialNode, generation);
     }
 
     private JsonObject createExecutionNode(String deviceType, String serialNumber, String command,
@@ -1390,19 +1483,18 @@ public class Connection {
         }
     }
 
-    public List<NotificationTO> getNotifications() {
-        try {
-            return requestBuilder.get(getAlexaServer() + "/api/notifications")
-                    .syncSend(NotificationListResponseTO.class).notifications;
-        } catch (ConnectionException e) {
-            logger.warn("Failed to get notifications: {}", e.getMessage());
-        }
-        return List.of();
+    private HttpRequestBuilder.Builder notificationsRequest(HttpMethod method, String subPath) {
+        return requestBuilder.builder(method, getAlexaServer() + "/api/notifications" + subPath)
+                .withHeader("User-Agent", NOTIFICATIONS_USER_AGENT);
+    }
+
+    public List<NotificationTO> getNotifications() throws ConnectionException {
+        // propagates the exception: an empty list is indistinguishable from "no notifications set"
+        return notificationsRequest(HttpMethod.GET, "").syncSend(NotificationListResponseTO.class).notifications;
     }
 
     public NotificationTO getNotification(String notificationId) throws ConnectionException {
-        String url = getAlexaServer() + "/api/notifications/" + notificationId;
-        return requestBuilder.get(url).syncSend(NotificationTO.class);
+        return notificationsRequest(HttpMethod.GET, "/" + notificationId).syncSend(NotificationTO.class);
     }
 
     public @Nullable NotificationTO createNotification(DeviceTO device, String type, @Nullable String label,
@@ -1428,13 +1520,13 @@ public class Connection {
         request.isSaveInFlight = true;
         request.isRecurring = false;
 
-        String url = getAlexaServer() + "/api/notifications/createReminder";
-        return requestBuilder.put(url).withContent(request).syncSend(NotificationTO.class);
+        return notificationsRequest(HttpMethod.PUT, "/createReminder").withContent(request)
+                .syncSend(NotificationTO.class);
     }
 
     public void deleteNotification(String notificationId) {
         try {
-            requestBuilder.delete(getAlexaServer() + "/api/notifications/" + notificationId).syncSend();
+            notificationsRequest(HttpMethod.DELETE, "/" + notificationId).syncSend();
         } catch (ConnectionException e) {
             logger.warn("Failed to delete notification {}: {}", notificationId, e.getMessage());
         }
@@ -1516,6 +1608,7 @@ public class Connection {
 
     private static class QueueObject {
         public @Nullable Future<?> future;
+        public long generation;
         public List<String> deviceSerialNumbers = List.of();
         public JsonObject nodeToExecute = new JsonObject();
     }

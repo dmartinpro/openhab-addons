@@ -13,10 +13,12 @@
 package org.openhab.binding.shelly.internal.api1;
 
 import static org.openhab.binding.shelly.internal.ShellyBindingConstants.*;
+import static org.openhab.binding.shelly.internal.api.ShellyApiLightUtil.*;
 import static org.openhab.binding.shelly.internal.api1.Shelly1ApiJsonDTO.*;
 import static org.openhab.binding.shelly.internal.util.ShellyUtils.*;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -78,7 +80,7 @@ public class Shelly1CoIoTProtocol {
         String rGroup = getProfile().numRelays <= 1 ? CHANNEL_GROUP_RELAY_CONTROL
                 : CHANNEL_GROUP_RELAY_CONTROL + rIndex;
 
-        switch (sen.type.toLowerCase()) {
+        switch (sen.type.toLowerCase(Locale.ROOT)) {
             case "b": // BatteryLevel +
                 updateChannel(updates, CHANNEL_GROUP_BATTERY, CHANNEL_SENSOR_BAT_LEVEL,
                         toQuantityType(s.value, 0, Units.PERCENT));
@@ -95,7 +97,7 @@ public class Shelly1CoIoTProtocol {
                         toQuantityType(s.value, DIGITS_LUX, Units.LUX));
                 break;
             case "s": // CatchAll
-                switch (sen.desc.toLowerCase()) {
+                switch (sen.desc.toLowerCase(Locale.ROOT)) {
                     case "state": // Relay status +
                     case "output":
                         updatePower(profile, updates, rIndex, sen, s, sensorUpdates);
@@ -141,23 +143,19 @@ public class Shelly1CoIoTProtocol {
                     // RGBW2/Bulb
                     case "red":
                         col.setRed((int) s.value);
-                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_RED,
-                                ShellyColorUtils.toPercent((int) s.value));
+                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_RED, col.getPercentRed());
                         break;
                     case "green":
                         col.setGreen((int) s.value);
-                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_GREEN,
-                                ShellyColorUtils.toPercent((int) s.value));
+                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_GREEN, col.getPercentGreen());
                         break;
                     case "blue":
                         col.setBlue((int) s.value);
-                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_BLUE,
-                                ShellyColorUtils.toPercent((int) s.value));
+                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_BLUE, col.getPercentBlue());
                         break;
                     case "white":
                         col.setWhite((int) s.value);
-                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_WHITE,
-                                ShellyColorUtils.toPercent((int) s.value));
+                        updateChannel(updates, CHANNEL_GROUP_COLOR_CONTROL, CHANNEL_COLOR_WHITE, col.getPercentWhite());
                         break;
                     case "gain":
                         col.setGain((int) s.value);
@@ -247,7 +245,7 @@ public class Shelly1CoIoTProtocol {
                 group = CHANNEL_GROUP_RELAY_CONTROL;
             } else if (profile.isRGBW2) {
                 checkL = String.valueOf(id); // String.valueOf(id - 1); // id is 1-based, L is 0-based
-                group = CHANNEL_GROUP_LIGHT_CHANNEL + id;
+                group = lightChannelGroupPrefix(profile) + id;
                 logger.trace("{}: updatePower() for L={}", thingName, checkL);
             }
 
@@ -320,7 +318,7 @@ public class Shelly1CoIoTProtocol {
         int idx = -1;
         CoIotDescrBlk blk = blkMap.get(sen.links);
         if (blk != null) {
-            String desc = blk.desc.toLowerCase();
+            String desc = blk.desc.toLowerCase(Locale.ROOT);
             if (desc.startsWith(SHELLY_CLASS_RELAY) || desc.startsWith(SHELLY_CLASS_ROLLER)
                     || desc.startsWith(SHELLY_CLASS_LIGHT) || desc.startsWith(SHELLY_CLASS_EMETER)) {
                 if (desc.contains("_")) { // CoAP v2

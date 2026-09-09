@@ -91,12 +91,13 @@ public class AggregateDataUpdatePublicApi extends AbstractCommand implements Sol
 
     @Override
     public void onComplete(@Nullable Result result) {
-        logger.debug("onComplete()");
+        logger.debug("[AggregateDataUpdatePublicApi] onComplete()");
+        logger.trace("URL: {}", getURL());
 
         if (!HttpStatus.Code.OK.equals(getCommunicationStatus().getHttpCode())) {
-            updateListenerStatus();
             if (retries++ < MAX_RETRIES) {
                 handler.getWebInterface().enqueueCommand(this);
+                return;
             }
         } else {
             String json = getContentAsString(StandardCharsets.UTF_8);
@@ -108,5 +109,6 @@ public class AggregateDataUpdatePublicApi extends AbstractCommand implements Sol
                 }
             }
         }
+        updateListenerStatus();
     }
 }

@@ -30,6 +30,7 @@ import org.openhab.binding.matter.internal.client.dto.cluster.gen.ElectricalPowe
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.FanControlCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.FormaldehydeConcentrationMeasurementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.GeneralDiagnosticsCluster;
+import org.openhab.binding.matter.internal.client.dto.cluster.gen.IcdManagementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.IlluminanceMeasurementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.LevelControlCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.ModeSelectCluster;
@@ -37,6 +38,7 @@ import org.openhab.binding.matter.internal.client.dto.cluster.gen.NetworkCommiss
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.NitrogenDioxideConcentrationMeasurementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.OccupancySensingCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.OnOffCluster;
+import org.openhab.binding.matter.internal.client.dto.cluster.gen.OtaSoftwareUpdateRequestorCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.OzoneConcentrationMeasurementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.Pm10ConcentrationMeasurementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.Pm1ConcentrationMeasurementCluster;
@@ -51,6 +53,7 @@ import org.openhab.binding.matter.internal.client.dto.cluster.gen.ThermostatClus
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.ThreadBorderRouterManagementCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.ThreadNetworkDiagnosticsCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.TotalVolatileOrganicCompoundsConcentrationMeasurementCluster;
+import org.openhab.binding.matter.internal.client.dto.cluster.gen.ValveConfigurationAndControlCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.WiFiNetworkDiagnosticsCluster;
 import org.openhab.binding.matter.internal.client.dto.cluster.gen.WindowCoveringCluster;
 import org.openhab.binding.matter.internal.handler.MatterBaseThingHandler;
@@ -72,6 +75,8 @@ public class ConverterRegistry {
         ConverterRegistry.registerConverter(SwitchCluster.CLUSTER_ID, SwitchConverter.class);
         ConverterRegistry.registerConverter(ThermostatCluster.CLUSTER_ID, ThermostatConverter.class);
         ConverterRegistry.registerConverter(WindowCoveringCluster.CLUSTER_ID, WindowCoveringConverter.class);
+        ConverterRegistry.registerConverter(ValveConfigurationAndControlCluster.CLUSTER_ID,
+                ValveConfigurationAndControlConverter.class);
         ConverterRegistry.registerConverter(PowerSourceCluster.CLUSTER_ID, PowerSourceConverter.class);
         ConverterRegistry.registerConverter(FanControlCluster.CLUSTER_ID, FanControlConverter.class);
         ConverterRegistry.registerConverter(RelativeHumidityMeasurementCluster.CLUSTER_ID,
@@ -115,9 +120,12 @@ public class ConverterRegistry {
                 ThreadNetworkDiagnosticsConverter.class);
         ConverterRegistry.registerConverter(ThreadBorderRouterManagementCluster.CLUSTER_ID,
                 ThreadBorderRouterManagementConverter.class);
+        ConverterRegistry.registerConverter(OtaSoftwareUpdateRequestorCluster.CLUSTER_ID,
+                OtaSoftwareUpdateRequestorConverter.class);
         ConverterRegistry.registerConverter(NetworkCommissioningCluster.CLUSTER_ID,
                 NetworkCommissioningConverter.class);
         ConverterRegistry.registerConverter(GeneralDiagnosticsCluster.CLUSTER_ID, GeneralDiagnosticsConverter.class);
+        ConverterRegistry.registerConverter(IcdManagementCluster.CLUSTER_ID, IcdManagementConverter.class);
         // Robotic Vacuum Cleaner converters
         ConverterRegistry.registerConverter(
                 org.openhab.binding.matter.internal.client.dto.cluster.gen.RvcRunModeCluster.CLUSTER_ID,

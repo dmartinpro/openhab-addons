@@ -22,6 +22,9 @@ The `project` Thing represents a Tuya developer portal cloud project (see below)
 `tuyaDevice` things represent a single device.
 They can be configured manually or by discovery.
 
+Note that `project` is a regular Thing and not a bridge.
+`tuyaDevice` things communicate with the device directly over the local network and do not need a bridge at runtime.
+
 ## Discovery
 
 Discovery is supported for `tuyaDevice` things.
@@ -73,6 +76,9 @@ Tuya devices announce their presence via UDP broadcast packets, which is usually
 Battery-powered devices do not announce their presence at all.
 If automatic protocol version detection does not work there is no clear rule how to determine if a device has protocol 3.3 or 3.1.
 In this case it is recommended to start with 3.3 and watch the log file. If 3.3 does not work, try using 3.1.
+
+The `port` defaults to `6668`, which is the TCP port used by Tuya devices.
+Change this only if the device is reached through a NAT/port mapping, e.g. when Tuya/IoT devices are isolated in a separate network and exposed through port forwarding.
 
 Some devices do not automatically refresh channels or only refresh at fairly long intervals even though the data is sampled at a much higher rate (e.g., some power meters only send updates every 10 minutes but sample continuously).
 The `pollingInterval` can be used to adjust how often channels are updated and can be set to `0` (off) or to any integer value of 10 seconds or higher. The default is 10 seconds.
@@ -181,8 +187,51 @@ After pressing buttons and copying codes, assign the codes to the Item which con
 
 After receiving the key code, learning mode automatically continues until you send the `study_exit` command or send a key code via the Item containing a code.
 
+## Full Example
+
+tuya.things:
+
+```java
+// Only needed for discovery and for looking up device credentials.
+// This is a regular Thing, not a bridge.
+Thing tuya:project:cloud "Tuya Cloud Project" [
+    username="me@example.com",
+    password="app-password",
+    accessId="ACCESS_ID",
+    accessSecret="ACCESS_SECRET",
+    countryCode="49",
+    schema="smartLife",
+    dataCenter="https://openapi.tuyaeu.com"
+]
+
+// Devices are standalone: no bridge reference, not nested in a Bridge block.
+Thing tuya:tuyaDevice:plug "Smart Plug" [
+    deviceId="DEVICE_ID",
+    productId="PRODUCT_ID",
+    localKey="LOCAL_KEY",
+    ip="192.168.1.100",
+    protocol="3.3",
+    pollingInterval=10
+] {
+    Channels:
+        Type switch : power                        [ dp=1 ]
+        Type string : work_mode                    [ dp=4, range="white,colour,scene,music" ]
+        Type number : countdown "Countdown"        [ dp=9, min=0, max=86400 ]
+}
+```
+
+tuya.items:
+
+```java
+Switch Plug_Power       "Power"              { channel="tuya:tuyaDevice:plug:power" }
+String Plug_WorkMode    "Work mode"          { channel="tuya:tuyaDevice:plug:work_mode" }
+Number Plug_Countdown   "Countdown [%d s]"   { channel="tuya:tuyaDevice:plug:countdown" }
+```
+
 ## Troubleshooting
 
+- If a `tuyaDevice` stays in state `UNINITIALIZED (BRIDGE_UNINITIALIZED)`, it is configured with a bridge.
+Remove the bridge reference (and any surrounding `Bridge { ... }` block) from the Thing definition, as described in [Supported Things](#supported-things).
 - If the `project` Thing is not coming `ONLINE`, check if you see your devices in the cloud account on `iot.tuya.com`.
 If the list is empty, most likely you selected the wrong data center.
 - Check if there are errors in the log and if you see messages like `Configuring IP address '192.168.1.100' for Thing 'tuya:tuya:tuyaDevice:bf3122fba012345fc9pqa'`.

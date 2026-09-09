@@ -42,7 +42,7 @@ import org.openhab.binding.astro.internal.util.MathUtils;
  *           zodiac based on http://lexikon.astronomie.info/java/sunmoon/
  */
 @NonNullByDefault
-public class MoonCalc extends AstroCalc {
+public class MoonCalc {
     private static final double FL = 1.0 - AstroConstants.WGS84_EARTH_FLATTENING;
     private static final EclipseCalc ECLIPSE_CALC = new MoonEclipseCalc();
 
@@ -106,7 +106,7 @@ public class MoonCalc extends AstroCalc {
 
         MoonPosition moonPosition = getMoonPosition(julianDate, latitude, longitude);
         moon.setPosition(moonPosition);
-        moon.setZodiac(ZodiacCalc.calculate(moonPosition.getLongitude(), null));
+        moon.setZodiac(ZodiacCalc.calculateMoon(moonPosition.getLongitude(), calendar.toInstant()));
         moon.setDistance(DistanceType.CURRENT, MoonDistanceCalc.calculate(julianDate));
     }
 

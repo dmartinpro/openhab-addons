@@ -177,7 +177,7 @@ public class EnOceanBridgeHandler extends ConfigStatusBridgeHandler implements T
 
     private synchronized void initTransceiver() {
         try {
-            EnOceanBridgeConfig c = getThing().getConfiguration().as(EnOceanBridgeConfig.class);
+            EnOceanBridgeConfig c = getConfigAs(EnOceanBridgeConfig.class);
             EnOceanTransceiver localTransceiver = transceiver;
             if (localTransceiver != null) {
                 localTransceiver.shutDown();
@@ -320,7 +320,7 @@ public class EnOceanBridgeHandler extends ConfigStatusBridgeHandler implements T
         Collection<ConfigStatusMessage> configStatusMessages = new LinkedList<>();
 
         // The serial port must be provided
-        String path = getThing().getConfiguration().as(EnOceanBridgeConfig.class).path;
+        String path = getConfigAs(EnOceanBridgeConfig.class).path;
         if (path.isEmpty()) {
             ConfigStatusMessage statusMessage = ConfigStatusMessage.Builder.error(PATH)
                     .withMessageKeySuffix(EnOceanConfigStatusMessage.PORT_MISSING.getMessageKey()).withArguments(PATH)
@@ -339,6 +339,10 @@ public class EnOceanBridgeHandler extends ConfigStatusBridgeHandler implements T
 
     public boolean isSmackClient(Thing sender) {
         return smackClients.contains(sender.getConfiguration().as(EnOceanBaseConfig.class).enoceanId);
+    }
+
+    public boolean isRS485Enabled() {
+        return getConfigAs(EnOceanBridgeConfig.class).rs485;
     }
 
     public @Nullable Integer getNextSenderId(Thing sender) {
@@ -379,8 +383,7 @@ public class EnOceanBridgeHandler extends ConfigStatusBridgeHandler implements T
         sendingThings[id] = null;
     }
 
-    public <T extends @Nullable Response> void sendMessage(BasePacket message,
-            @Nullable ResponseListener<T> responseListener) {
+    public <T extends Response> void sendMessage(BasePacket message, @Nullable ResponseListener<T> responseListener) {
         try {
             EnOceanTransceiver localTransceiver = transceiver;
             if (localTransceiver == null) {
