@@ -40,39 +40,51 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralSystemConfiguration {
 
+    /** The installation's overall setup state. */
     @SerializedName("installationState")
     public int installationState = 0;
 
+    /** Group indices armed by {@code MODE_PRESENCE}. */
     @SerializedName("presenceGroup")
     public @Nullable List<Integer> presenceGroup;
 
+    /** Group indices armed by {@code MODE_PARTIAL1}. */
     @SerializedName("partialGroup1")
     public @Nullable List<Integer> partialGroup1;
 
+    /** Group indices armed by {@code MODE_PARTIAL2}. */
     @SerializedName("partialGroup2")
     public @Nullable List<Integer> partialGroup2;
 
+    /** The alarm system's own identity (box/central serials and name). */
     @SerializedName("alarm")
     public @Nullable DiagralAlarm alarm;
 
+    /** Every motion/contact sensor in the installation. */
     @SerializedName("sensors")
     public @Nullable List<DiagralDevice> sensors;
 
+    /** Every siren in the installation. */
     @SerializedName("sirens")
     public @Nullable List<DiagralDevice> sirens;
 
+    /** Every camera in the installation. */
     @SerializedName("cameras")
     public @Nullable List<DiagralDevice> cameras;
 
+    /** Every transmitter (including plugs) in the installation. */
     @SerializedName("transmitters")
     public @Nullable List<DiagralDevice> transmitters;
 
+    /** Every keypad in the installation (the API's "commands" category). */
     @SerializedName("commands")
     public @Nullable List<DiagralDevice> commands;
 
+    /** Every device group defined in the installation. */
     @SerializedName("groups")
     public @Nullable List<DiagralGroup> groups;
 
+    /** The central alarm unit's own configuration and status. */
     @SerializedName("centralInformation")
     public @Nullable DiagralCentral centralInformation;
 }

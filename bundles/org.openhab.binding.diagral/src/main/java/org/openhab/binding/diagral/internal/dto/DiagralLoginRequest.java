@@ -30,9 +30,11 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralLoginRequest {
 
+    /** The Diagral account's email address. */
     @SerializedName("username")
     public String username;
 
+    /** The Diagral account's password. */
     @SerializedName("password")
     public String password;
 

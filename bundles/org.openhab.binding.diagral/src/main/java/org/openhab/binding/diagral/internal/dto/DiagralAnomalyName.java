@@ -33,9 +33,13 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralAnomalyName {
 
+    /** Opaque numeric identifier for this specific anomaly occurrence; not otherwise used by this binding. */
     @SerializedName("id")
     public int id;
 
+    /**
+     * The anomaly code, e.g. {@code "inhibited"} (see {@code DiagralBindingConstants#DEVICE_ANOMALY_NAME_INHIBITED}).
+     */
     @SerializedName("name")
     public @Nullable String name;
 }

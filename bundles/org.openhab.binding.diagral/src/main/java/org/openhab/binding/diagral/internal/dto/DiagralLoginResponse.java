@@ -31,6 +31,7 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralLoginResponse {
 
+    /** Bearer access token, used only as the {@code Authorization} credential for the API-key-exchange call. */
     @SerializedName("access_token")
     public @Nullable String accessToken;
 }

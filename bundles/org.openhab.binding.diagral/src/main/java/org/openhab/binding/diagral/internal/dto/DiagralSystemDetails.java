@@ -34,36 +34,47 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralSystemDetails {
 
+    /** The central unit's device type. */
     @SerializedName("DeviceType")
     public @Nullable String deviceType;
 
+    /** The central unit's installed firmware version. */
     @SerializedName("FirmwareVersion")
     public @Nullable String firmwareVersion;
 
+    /** The central unit's IP address. */
     @SerializedName("IpAddress")
     public @Nullable String ipAddress;
 
+    /** The installed iPoda protocol version. */
     @SerializedName("IpodaVersion")
     public @Nullable String ipodaVersion;
 
+    /** The central unit's operating mode string. */
     @SerializedName("Mode")
     public @Nullable String mode;
 
+    /** The first vocal contact configured for the system. */
     @SerializedName("FirstVocalContact")
     public @Nullable String firstVocalContact;
 
+    /** Whether an alarm recording file is present, as a string flag. */
     @SerializedName("IsAlarmFilePresent")
     public @Nullable String isAlarmFilePresent;
 
+    /** Whether MJPEG archive video playback is supported, as a string flag. */
     @SerializedName("IsMJPEGArchiveVideoSupported")
     public @Nullable String isMJPEGArchiveVideoSupported;
 
+    /** Whether the central unit has mass storage present, as a string flag. */
     @SerializedName("IsMassStoragePresent")
     public @Nullable String isMassStoragePresent;
 
+    /** Whether remote startup/shutdown is allowed, as a string flag. */
     @SerializedName("IsRemoteStartupShutdownAllowed")
     public @Nullable String isRemoteStartupShutdownAllowed;
 
+    /** Whether video access is password-protected, as a string flag. */
     @SerializedName("IsVideoPasswordProtected")
     public @Nullable String isVideoPasswordProtected;
 }

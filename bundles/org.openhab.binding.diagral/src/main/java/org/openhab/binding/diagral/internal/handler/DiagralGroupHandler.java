@@ -19,6 +19,7 @@ import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.diagral.internal.DiagralConfiguration;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
 import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
+import org.openhab.core.library.types.DecimalType;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.ChannelUID;
@@ -44,6 +45,7 @@ import org.slf4j.LoggerFactory;
  * <ul>
  * <li>{@code active} - Group activation state (ON=active, OFF=inactive)</li>
  * <li>{@code status} - Group status description</li>
+ * <li>{@code group-id} - The group's own numeric Diagral identifier</li>
  * </ul>
  * </p>
  *
@@ -67,6 +69,25 @@ public class DiagralGroupHandler extends DiagralBaseThingHandler {
     /**
      * Reads and validates the group configuration, checks bridge availability, and performs an initial
      * status refresh.
+     *
+     * <p>
+     * {@code groupId} is Diagral's own numeric group index (see {@link DiagralConfiguration#groupId}'s
+     * Javadoc) - it must parse as an integer to be published on {@code group-id}, since that channel is a
+     * {@code Number} item (see the batch {@code activate-groups}/{@code disable-groups} channels on
+     * {@code DiagralSystemHandler}, which is what {@code group-id} exists to feed). A non-numeric value is
+     * rejected here rather than left to fail later at command time.
+     * </p>
+     *
+     * <p>
+     * {@code group-id} is published as soon as it's parsed, <em>before</em> the bridge-availability check
+     * below - deliberately not gated on the thing going {@code ONLINE}. Unlike {@code active}/{@code
+     * status}, it's a pure echo of this thing's own configuration, not data that depends on the bridge or
+     * a live poll, so there's no reason to withhold it while the bridge is offline or still authenticating
+     * - live-verified (2026-09-09) that this API's well-documented flakiness routinely delays the bridge
+     * coming online well past this handler's {@code initialize()}, and {@code bridgeStatusChanged()}
+     * doesn't repeat this publish, so gating it on bridge availability would leave {@code group-id}
+     * permanently {@code NULL} in exactly that (common) case.
+     * </p>
      */
     @Override
     public void initialize() {
@@ -79,7 +100,17 @@ public class DiagralGroupHandler extends DiagralBaseThingHandler {
             return;
         }
 
+        int numericGroupId;
+        try {
+            numericGroupId = Integer.parseInt(config.groupId);
+        } catch (NumberFormatException e) {
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
+                    "Group ID must be numeric: " + config.groupId);
+            return;
+        }
+
         this.groupId = config.groupId;
+        updateState(CHANNEL_GROUP_ID, new DecimalType(numericGroupId));
 
         if (!goOnlineIfBridgeAvailable()) {
             return;
