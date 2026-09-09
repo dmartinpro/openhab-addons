@@ -13,7 +13,7 @@ The repo-wide `AGENTS.md` at the monorepo root (`../../AGENTS.md`) has general o
 The user wants this bundle's source code thoroughly documented for maintainability, beyond openHAB's own guideline (which only requires Javadoc on public/protected/default-visibility members and exempts DTOs — see "Null-safety and visibility" below). For this bundle specifically:
 
 - **Every class and interface** gets a class-level Javadoc block explaining both its functional role (why it exists, what part of the binding it belongs to) and relevant technical detail.
-- **Every method — public, protected, package-private, *and* private** — gets a Javadoc block: a one-line functional summary, `@param`/`@return`/`@throws` as applicable, and a short "why/how" note for anything non-obvious. This applies to DTOs too, despite the general openHAB exemption.
+- **Every method — public, protected, package-private, _and_ private** — gets a Javadoc block: a one-line functional summary, `@param`/`@return`/`@throws` as applicable, and a short "why/how" note for anything non-obvious. This applies to DTOs too, despite the general openHAB exemption.
 - **Standing rule for all future work**: whenever a class or method in this bundle is created or edited, its Javadoc must be added or updated in the same change. Don't leave it for a later cleanup pass.
 
 ## Build & Test Commands
@@ -54,11 +54,11 @@ There is currently no `src/test` directory in this bundle — no unit tests exis
 `DiagralHandlerFactory` (`internal/DiagralHandlerFactory.java`) maps `ThingTypeUID` → handler class; it's the single place new thing types must be registered.
 
 **The `armed-status` channel publishes ten distinct values, not five.** The five named modes in
-`NAMED_SYSTEM_MODES` are the only *sendable* ones (`mode-control`); the API additionally reports
+`NAMED_SYSTEM_MODES` are the only _sendable_ ones (`mode-control`); the API additionally reports
 `TEMPO_1`/`TEMPO_2`/`TEMPO_GROUP` (exit-delay countdowns toward `PARTIAL1`-or-`PRESENCE`, `PARTIAL2`, and
 `FULL`-or-direct-group-activation respectively), the settled `GROUP` (resting state after a direct zone
 activation - not transitional, can persist indefinitely), and `LEARNING_MODE` (device enrollment; the
-system is *not* armed). All ten are declared as options on the `armed-status` channel-type so none render
+system is _not_ armed). All ten are declared as options on the `armed-status` channel-type so none render
 as raw strings; `DiagralBindingConstants.ALL_SYSTEM_STATUSES` is the single list they are kept in, and
 `DiagralArmedStatusOptionsTest` fails the build if `thing-types.xml` or the i18n bundle drifts from it.
 None of the five non-named values needs branching logic - `isGroupActive()`/`getDisplayedMode()` already
@@ -123,7 +123,7 @@ Child handlers never talk to the network directly — they always go through `ge
 
 ## openHAB Coding Guidelines
 
-(From https://www.openhab.org/docs/developer/guidelines.html and https://www.openhab.org/docs/developer/bindings/ — apply these when writing or reviewing code in this bundle.)
+(From <https://www.openhab.org/docs/developer/guidelines.html> and <https://www.openhab.org/docs/developer/bindings/> — apply these when writing or reviewing code in this bundle.)
 
 ### Naming
 
@@ -191,7 +191,7 @@ behaviour.
 
 ## Testing conventions (for when tests are added)
 
-(From https://www.openhab.org/docs/developer/tests.html — this bundle has no tests yet, but new ones must follow these rules or Maven's Surefire plugin won't pick them up / the build guidelines will flag them.)
+(From <https://www.openhab.org/docs/developer/tests.html> — this bundle has no tests yet, but new ones must follow these rules or Maven's Surefire plugin won't pick them up / the build guidelines will flag them.)
 
 - Unit tests live under `src/test/java`, mirroring the `internal` package structure; test classes must be **named `*Test`** (singular suffix) or Surefire won't run them, and test methods need `@Test`.
 - Use JUnit 5 (Jupiter) + Mockito: `@ExtendWith(MockitoExtension.class)` on the test class, `@Mock` for collaborators (e.g. mock the Jetty `HttpClient`/`ContentResponse` to unit-test `DiagralHttpClient`, or mock `ThingHandlerCallback` to unit-test the handlers without a live framework).
@@ -203,10 +203,10 @@ behaviour.
 
 - **[Fixed 2026-09-04]** `DiagralBridgeHandler.registerDiscoveryListener` had a `TODO: complete this function` — it only stored the listener without pushing already-known devices to it. Fixed by triggering a catch-up scan via the listener's inherited `startScan(ScanListener)` (the same public entry point the openHAB framework itself uses), so a listener registering after the bridge already has a populated configuration immediately sees every currently-known device. Verified live: the catch-up scan correctly fires on registration and gracefully logs a warning (pre-existing `startScan()` behavior, not new) rather than failing when no configuration is available yet (e.g. right at bridge startup, before the first successful poll).
 - **[Fixed 2026-09-04]** `DiagralBridgeHandler.poll()` had a `TODO` noting that consecutive poll failures should eventually flip the bridge offline; a single failed poll was logged and ignored, with no way to ever surface a genuinely sustained outage. Fixed with a `consecutivePollFailures` counter: reset to 0 on every successful poll, incremented on every plain (non-authentication) failure, and the bridge flips `OFFLINE`/`COMMUNICATION_ERROR` once it reaches `MAX_CONSECUTIVE_POLL_FAILURES` (5) in a row. The threshold is deliberately generous, chosen from this bundle's own live-observed pattern of individual timeouts/`EOFException`s self-healing within 1-3 poll cycles, so normal transient flakiness never trips it. Verified live under real (unforced) conditions: a natural `EOFException` correctly didn't flip the bridge offline, and the very next successful poll correctly reset the counter. The actual threshold-crossing path wasn't exercised live (forcing 5 genuine consecutive API failures isn't practical to arrange), but is simple, deterministic logic verified by code review.
-- **[Fixed 2026-09-03, commit `ea329c28d`]** `DiagralBridgeHandler.initialize()` never retried a failed *first* authentication attempt — confirmed live (2026-09-03) that a transient network failure during startup (the same flakiness `poll()` already tolerates) left the bridge permanently `OFFLINE`/`COMMUNICATION_ERROR` until it was manually reinitialized (disable/enable the Thing, or restart openHAB), even though the exact same failure mid-poll self-healed on the next scheduled cycle. Fixed by extracting the retry into `attemptInitialAuthentication()`, which reschedules itself on failure using the same cadence as regular polling. **Verified live**: a hot-deployed reload hit a transient failure, correctly scheduled a retry, and came online automatically 60 seconds later with no manual intervention.
+- **[Fixed 2026-09-03, commit `ea329c28d`]** `DiagralBridgeHandler.initialize()` never retried a failed _first_ authentication attempt — confirmed live (2026-09-03) that a transient network failure during startup (the same flakiness `poll()` already tolerates) left the bridge permanently `OFFLINE`/`COMMUNICATION_ERROR` until it was manually reinitialized (disable/enable the Thing, or restart openHAB), even though the exact same failure mid-poll self-healed on the next scheduled cycle. Fixed by extracting the retry into `attemptInitialAuthentication()`, which reschedules itself on failure using the same cadence as regular polling. **Verified live**: a hot-deployed reload hit a transient failure, correctly scheduled a retry, and came online automatically 60 seconds later with no manual intervention.
 - **[Fixed 2026-09-04, commit `b06c1ec1f`]** `DiagralBridgeHandler.isGroupActive()` didn't trust the settled status `GROUP`, even though the real API reliably populates `activated_groups` while in that state. **Conclusively proven live (2026-09-04)** by adding `TRACE`-level logging to `isGroupActive()`/`getDisplayedMode()` (kept in the code, controlled by the logger's level, see the diagnostic-only Javadoc notes on both methods) and activating group 2 via the official e-ONE app (external to openHAB, nothing here was triggered through this binding). The exact trace sequence that led to the fix (kept here as historical evidence, since mechanism 1 below is still open):
 
-  ```
+  ```text
   11:46:34 Failed to get system status: Request timeout
   11:46:34 isGroupActive(1): status=null (not a named mode), activeGroupIds=[], result=false
   11:46:44 Failed to get system status: Request timeout
@@ -220,7 +220,7 @@ behaviour.
   Two distinct mechanisms are visible here, independently confirmed - only the second is fixed by this entry, the first is the separate `refreshChildHandlers()` entry immediately below, still open:
 
   1. **Timing/race** (`11:46:34`-`11:46:44`): each child handler's own `getSystemStatus()` call independently re-fetches once the 5s cache expires; under real-world network latency (very common against this API, see the many `Request timeout`/`EOFException` lines throughout this bundle's logs) two consecutive handlers can each hit their own 10s timeout and see `status=null`, missing the real data entirely. Not fixed by this entry - needs the separate one-status-snapshot-per-poll fix described below.
-  2. **Logic gap** (`11:50:05`, the smoking gun) - **fixed**: once status genuinely settles to `GROUP`, the API handed back `activated_groups:[2]` - the exact correct answer, precisely matching what was armed - and `isGroupActive()` still returned `false`, because `GROUP` isn't in `NAMED_SYSTEM_MODES`, so it fell straight to the empty `activeGroupIds` fallback without ever looking at `activated_groups`. A pure logic bug, not a timing issue - the correct data was sitting right there in the response and got ignored.
+  1. **Logic gap** (`11:50:05`, the smoking gun) - **fixed**: once status genuinely settles to `GROUP`, the API handed back `activated_groups:[2]` - the exact correct answer, precisely matching what was armed - and `isGroupActive()` still returned `false`, because `GROUP` isn't in `NAMED_SYSTEM_MODES`, so it fell straight to the empty `activeGroupIds` fallback without ever looking at `activated_groups`. A pure logic bug, not a timing issue - the correct data was sitting right there in the response and got ignored.
 
   **Fix implemented (2026-09-04, commit `b06c1ec1f`)**: added `DiagralBindingConstants.SYSTEM_STATUS_GROUP = "GROUP"` alongside `MODE_TEMPO_GROUP`, and gave `isGroupActive()` a second authoritative branch before the `activeGroupIds` fallback, trusting `activated_groups` directly when status is `GROUP`, and opportunistically resyncing `activeGroupIds` to match so the transitional-status fallback stays honest for the next `TEMPO_GROUP`-only read. **Verified live end-to-end on group 2, both directions** (2026-09-04): activating via e-ONE correctly flipped `active`/`status` to `ON`/`Active`, deactivating correctly flipped them back, the first time in this investigation a group armed outside openHAB was correctly reflected.
 
@@ -238,14 +238,14 @@ A security review of the whole bundle produced findings S1-S5, all implemented i
 (`src/test/java/.../bridge/`, 20 tests, JUnit 5 + Mockito - the parent reactor supplies both, no `pom.xml`
 change needed). Each fix was mutation-checked: reverting it makes the matching test fail.
 
-- **S1 - secrets no longer reach the log.** `executeHttpRequest()` used to log *every* response body at
+- **S1 - secrets no longer reach the log.** `executeHttpRequest()` used to log _every_ response body at
   `DEBUG`, which included the login response's `access_token` and the API-key response's `api_key` +
   `secret_key` (the HMAC signing key). Bodies now log at `TRACE` (they are verbose payloads, per the
   logging guideline), and the two credential-bearing responses are replaced with `REDACTED_BODY` even
   there, via a `sensitiveResponse` flag threaded through `executeUnauthenticatedPost`/`executeWithToken`.
   The request line also no longer logs the Jetty `Request` object (whose `toString()` shape is an
   implementation detail) - just method and URI. `generateApiKey()` no longer logs its whole request body.
-  A second leak on the same path was found *by the test written for this fix*, not by the review: the
+  A second leak on the same path was found _by the test written for this fix_, not by the review: the
   key-deletion endpoint embeds the API key in its URL path (`/users/systems/{serialId}/api_keys/{apiKey}`),
   so logging the URI disclosed a live key regardless of the body redaction - and made the masked "Deleted
   API key ...6789" audit line useless, since the full key sat one line above it. `sanitizeUrlForLog()` now
@@ -261,8 +261,8 @@ change needed). Each fix was mutation-checked: reverting it makes the matching t
   key and minted a replacement, looping for as long as the bad request was retried. 400 is now a plain
   `DiagralApiException`. **This did not weaken bad-credential reporting**: `login()`/`generateApiKey()`
   already re-wrap any `DiagralException` into `DiagralAuthenticationException`, so a 400 during the auth
-  flow still surfaces as one (covered by `badRequestDuringLoginIsStillAnAuthenticationFailure`). *Residual
-  risk, worth watching in the logs*: if Diagral turns out to return 400 for a genuinely expired API key on
+  flow still surfaces as one (covered by `badRequestDuringLoginIsStillAnAuthenticationFailure`). _Residual
+  risk, worth watching in the logs_: if Diagral turns out to return 400 for a genuinely expired API key on
   a signed request, that case would no longer self-heal - it would surface as repeated `Bad request`
   warnings and eventually trip `MAX_CONSECUTIVE_POLL_FAILURES`.
 - **S4 - narrower credential surface.** Removed the unused `getSecretKey()`, and replaced `getPassword()`
@@ -280,19 +280,19 @@ in one 90-second window, since the two builds' log lines are distinguishable by 
 
 - **S1 confirmed, both directions.** Across the new bundle's 11 response-log lines: zero occurrences of
   `"access_token"`/`"secret_key"`/`"api_key"`, two `<redacted: response carries credentials>` markers (login
-  + API-key generation), zero unmasked keys in logged URLs - and ordinary `/status` payloads still present
+  and API-key generation), zero unmasked keys in logged URLs - and ordinary `/status` payloads still present
   at `TRACE`, so the redaction is targeted rather than a blanket loss of troubleshooting output. In the same
-  window the *old* bundle, disposing, leaked one credential-bearing response body and one **full API key in
+  window the _old_ bundle, disposing, leaked one credential-bearing response body and one **full API key in
   plaintext in a request URL** (`.../api_keys/<uuid>`) - the exact URL-path leak that the unit test written
   for S1 caught and that `sanitizeUrlForLog()` now closes. That specific key was deleted server-side moments
   later by the same dispose, so it is already revoked.
-- **S2 half-confirmed.** The new bundle correctly issued *no* DELETE on its first authentication (nothing to
+- **S2 half-confirmed.** The new bundle correctly issued _no_ DELETE on its first authentication (nothing to
   supersede) - the live counterpart of `firstAuthenticationDoesNotDeleteAnything`. The superseded-key path
   still needs a 401 to exercise; forcing one means temporarily setting a wrong PIN code, which was not done.
 - **Not caused by this change**: the first authentication after the hot swap timed out (10s
   `REQUEST_TIMEOUT_SECONDS`) because the disposing old bundle and the initializing new one both log in within
   ~0.4s, on an API already documented here as timeout-prone. This is pre-existing hot-swap behaviour - note
-  `deleteSupersededApiKey()` *reuses* `authenticate()`'s existing access token, so S2 adds no extra login.
+  `deleteSupersededApiKey()` _reuses_ `authenticate()`'s existing access token, so S2 adds no extra login.
   `attemptInitialAuthentication()` retried after 60s and the bridge came ONLINE, with every child thing
   following - incidentally re-confirming the `ea329c28d` retry fix.
 
@@ -329,7 +329,7 @@ tests (`DiagralBridgeHandlerTest`, `DiagralSensorStateTest`); every fix was muta
   old future, missed the new one, and left it retrying - and possibly calling `startPolling()` - on a dead
   handler. Now guarded by a `disposed` flag, re-checked after the job is published to close the
   check-then-schedule window. **The non-obvious part**: `BaseThingHandler.thingUpdated()` calls
-  `dispose()` then `initialize()` on the *same* handler instance whenever the thing's configuration is
+  `dispose()` then `initialize()` on the _same_ handler instance whenever the thing's configuration is
   edited, so `initialize()` must reset `disposed` (and the failure counter). A sticky flag would have
   meant the bridge never came back online after any config change - caught while implementing, and pinned
   by `disposedFlagIsClearedByReinitialisation`.
@@ -365,16 +365,17 @@ every child thing following, and no bridge status change since.
     Configuration()` is check-then-fetch with no lock, so handlers initialising together can each miss the
     empty cache) - not introduced by C1-C5, and not fixed by them either.
 - **Timeout rate unchanged**: 3 `Request timeout`s in ~7 minutes on the new build vs 12 in ~24 minutes on
-  the old - the same documented API flakiness, and two consecutive poll timeouts correctly did *not* trip
+  the old - the same documented API flakiness, and two consecutive poll timeouts correctly did _not_ trip
   `MAX_CONSECUTIVE_POLL_FAILURES`. Poll cadence 66s/73s on a 60s fixed delay, so the C2 lock introduces no
   starvation.
 - **Not live-observable here**: C5. No items are linked to the `motion`/`contact` channels on this system,
   so openHAB emits no state events for them. Covered by unit tests only; link an item to see `UNDEF`.
 
 **Two regressions were introduced and caught during this work**, both worth remembering:
+
 1. A sticky `disposed` flag would have meant the bridge never came back online after a config edit, because
    `BaseThingHandler.thingUpdated()` reuses the handler instance (see C3 above).
-2. `getConfigStatus()` still referenced the `diagralBridgeConfig` field deleted in the C1 rewrite. **Only
+1. `getConfigStatus()` still referenced the `diagralBridgeConfig` field deleted in the C1 rewrite. **Only
    `mvn clean install` caught it** - `mvn compile`/`mvn test` kept passing against stale incremental
    classes. Do not treat a passing incremental build as evidence here.
 
@@ -419,14 +420,14 @@ Covered by 16 further unit tests; all mutation-checked (see the note on M14 belo
 
 - **C6 - discovery can no longer be taken down by a partial API response.** `DiagralAlarm.getId()`
   derives an id from the box serial and returns `null` when the box or serial is missing or too short;
-  that value went straight into `new ThingUID(...)`, which throws - aborting the *entire* scan, so one
+  that value went straight into `new ThingUID(...)`, which throws - aborting the _entire_ scan, so one
   malformed alarm record meant no devices discovered at all. Now null-checked (the result is skipped with
   a debug line), and every id passes through `toUidSegment()`, since `ThingUID` also rejects characters
   outside `[a-zA-Z0-9_]`. `DiagralAlarm` was also the one DTO missing `@NonNullByDefault`; adding it
   immediately surfaced two more unguarded field reads in `discoverAlarmSystem()`, which are now locals.
 - **P1+P2 - one snapshot per refresh cycle.** `DiagralPollSnapshot` carries the status, configuration and
   anomalies that every handler in a cycle works from. This replaces the `refreshChildHandlers()` hack that
-  re-stamped the status cache's timestamp before each handler so a shared value kept *looking* fresh -
+  re-stamped the status cache's timestamp before each handler so a shared value kept _looking_ fresh -
   correct in effect, but it worked by making the cache lie about its age, and a handler that took longer
   than the TTL could still leave later handlers reading different data. Passing the value explicitly means
   there is nothing to lie about. `refreshStatus()` now takes the snapshot (P1 falls out of this: anomalies
@@ -438,15 +439,15 @@ Covered by 16 further unit tests; all mutation-checked (see the note on M14 belo
   handlers can share one snapshot.
 - **P3 - exponential backoff on 429/5xx.** `applyBackoff()` doubles the delay per consecutive occurrence
   from the configured poll interval up to `MAX_BACKOFF_MS` (10 min); any successful poll clears it.
-  Implemented as a *deadline* that `scheduledPoll()` checks, not a rescheduled job, so the existing
+  Implemented as a _deadline_ that `scheduledPoll()` checks, not a rescheduled job, so the existing
   fixed-delay schedule is untouched and only individual ticks are skipped. **Only the scheduled path backs
   off** - a command-triggered poll runs regardless, because it exists to reflect a change the user just
-  made. Ordinary timeouts deliberately do *not* trigger backoff: this API's baseline timeout rate is
+  made. Ordinary timeouts deliberately do _not_ trigger backoff: this API's baseline timeout rate is
   around 40%, so treating those as throttling would leave the binding barely polling at all.
 
 **Live testing found a gap review did not**: with C8 dispatching every handler's refresh concurrently,
 `getSystemStatus()` turned out to have the same check-then-fetch race P4 fixed for the configuration - and
-worse, because a *failed* fetch caches nothing for others to reuse. Observed right after a deploy with the
+worse, because a _failed_ fetch caches nothing for others to reuse. Observed right after a deploy with the
 API misbehaving: ten handlers each issued their own status request within 30ms and each waited out its own
 10-second timeout. `statusFetchLock` now single-flights it, mirroring `configurationFetchLock`; the count
 of duplicate status failures went from 10 to 0 on the next deploy. **Unit tests would not have surfaced
@@ -482,10 +483,10 @@ Pure refactors - no behaviour change intended, and the existing suite plus two n
   checked exceptions) and `command(...)` for state changes (logs, then always re-polls in a `finally`).
   `deviceCommand(...)` adds the configuration-cache invalidation the enable/disable pair needs.
 
-  **A trap worth recording**: the obvious way to write `deviceCommand` is to invalidate the cache *before*
+  **A trap worth recording**: the obvious way to write `deviceCommand` is to invalidate the cache _before_
   the call. That is not equivalent - it leaves a window where a concurrent reader fetches the
   still-unchanged configuration and caches it as fresh, which the follow-up poll then trusts. The
-  invalidation has to stay *after* the call, in a `finally`, exactly where it was. Caught during
+  invalidation has to stay _after_ the call, in a `finally`, exactly where it was. Caught during
   implementation, not by a test.
 - **D5 - `DiagralHandlerFactory`**'s ten-branch `if/else` is now a `Map<ThingTypeUID, Function<Thing,
   ThingHandler>>`, and `SUPPORTED_THING_TYPES_UIDS` is derived from its key set instead of maintained in
