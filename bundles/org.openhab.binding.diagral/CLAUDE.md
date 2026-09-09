@@ -537,6 +537,28 @@ Closes the remaining review items. No behaviour change except where noted.
   404-means-no-anomalies path, and `getThingTypeForDevice`. `getThingTypeForDevice` was widened from
   private to package-private for this - the alternative was reflection, which the null analysis fights.
 
+## `contact-sensor`'s channel referenced a system channel type that does not exist (2026-09-09)
+
+`contact-sensor`'s `contact` channel declared `typeId="system.contact"`. Confirmed by reflecting the actual
+`SYSTEM_CHANNEL_TYPE_UID_*` constants on core's `org.openhab.core.thing.DefaultSystemChannelTypeProvider`
+(org.openhab.core.thing 5.2.0-SNAPSHOT) that no `contact` system channel type is defined there - only
+`motion` and others - and live-confirmed on the `openhab-dev` container that `GET
+/rest/thing-types/diagral:contact-sensor` returned only the `enabled` and `low-battery` channels. The
+framework drops an unresolvable `typeId` reference silently rather than failing to start, so every
+`contact-sensor` Thing has never actually exposed a `contact` channel at all - `motion-sensor`'s
+`typeId="system.motion"` was unaffected since core does define that one.
+
+**Fix**: added a binding-owned `channel-type id="contact"` (item-type `Contact`, read-only, tagged
+`OpenState`) and pointed `contact-sensor`'s `contact` channel at it instead. No handler logic changed -
+`DiagralContactSensorHandler` already correctly published `UnDefType.UNDEF` (see C5 above); that update
+simply had nowhere to go before this fix, since the channel it targeted didn't exist.
+
+**New regression test**: `DiagralChannelTypeResolutionTest` parses `thing-types.xml` and reflects core's
+`DefaultSystemChannelTypeProvider` to check every `system.*` channel `typeId` reference against the real
+set core defines, and every other reference against the channel-types this bundle itself declares - the
+same check that would have caught this bug immediately. Mutation-checked by temporarily reverting to
+`system.contact`: two of its three tests failed with the exact non-existence this entry describes.
+
 ## Out of scope: automatism "rudes" (shutters, gates, comfort relays)
 
 Diagral's API models a device category called **rudes** (`pydiagral.models.Rudes`) — secondary home-automation
