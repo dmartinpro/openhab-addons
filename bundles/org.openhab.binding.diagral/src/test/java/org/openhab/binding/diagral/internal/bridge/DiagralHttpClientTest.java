@@ -441,6 +441,65 @@ public class DiagralHttpClientTest {
         assertThat(requests, is(empty()));
     }
 
+    /**
+     * The real API's {@code groups} array accepts more than one element, so several groups can be
+     * activated in a single request instead of one request per group.
+     */
+    @Test
+    public void activateGroupsSendsEveryGroupInOneRequest() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.OK_200, "{}");
+
+        client.activateGroups(List.of("1", "3", "5"));
+
+        assertThat(requests, hasSize(1));
+        Request request = builtRequests.get(0);
+        ArgumentCaptor<ContentProvider> body = ArgumentCaptor.forClass(ContentProvider.class);
+        verify(request).content(body.capture());
+        assertThat(readBody(body.getValue()), is("{\"groups\":[1,3,5]}"));
+    }
+
+    /** Same as {@link #activateGroupsSendsEveryGroupInOneRequest()}, for the disable endpoint. */
+    @Test
+    public void disableGroupsSendsEveryGroupInOneRequest() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.OK_200, "{}");
+
+        client.disableGroups(List.of("2", "4"));
+
+        assertThat(requests, hasSize(1));
+        Request request = builtRequests.get(0);
+        ArgumentCaptor<ContentProvider> body = ArgumentCaptor.forClass(ContentProvider.class);
+        verify(request).content(body.capture());
+        assertThat(readBody(body.getValue()), is("{\"groups\":[2,4]}"));
+    }
+
+    /** The order of {@code groupIds} is preserved verbatim in the request body, not sorted. */
+    @Test
+    public void groupIdOrderIsPreservedInThePayload() throws Exception {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+        enqueue(HttpStatus.OK_200, "{}");
+
+        client.activateGroups(List.of("5", "1", "3"));
+
+        Request request = builtRequests.get(0);
+        ArgumentCaptor<ContentProvider> body = ArgumentCaptor.forClass(ContentProvider.class);
+        verify(request).content(body.capture());
+        assertThat(readBody(body.getValue()), is("{\"groups\":[5,1,3]}"));
+    }
+
+    /**
+     * If any single element of a multi-group command is non-numeric, the whole request is rejected
+     * locally - no partial request is sent for the valid elements.
+     */
+    @Test
+    public void nonNumericGroupIdInMultiGroupCommandIsRejectedBeforeSending() {
+        authManager.setApiKeys("api-key-1", "secret-key-1");
+
+        assertThrows(DiagralApiException.class, () -> client.activateGroups(List.of("1", "kitchen", "3")));
+        assertThat(requests, is(empty()));
+    }
+
     /** An unknown product type is rejected locally - the API has no endpoint for it. */
     @Test
     public void unknownProductTypeIsRejectedBeforeSending() {

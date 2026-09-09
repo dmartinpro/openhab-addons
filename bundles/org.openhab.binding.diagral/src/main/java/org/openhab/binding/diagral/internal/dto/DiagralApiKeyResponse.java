@@ -31,9 +31,11 @@ import com.google.gson.annotations.SerializedName;
 @NonNullByDefault
 public class DiagralApiKeyResponse {
 
+    /** The API key, sent as the {@code X-APIKEY} header on every subsequent signed request. */
     @SerializedName("api_key")
     public @Nullable String apiKey;
 
+    /** The signing secret paired with {@link #apiKey}, used to compute the {@code X-HMAC} header. */
     @SerializedName("secret_key")
     public @Nullable String secretKey;
 }

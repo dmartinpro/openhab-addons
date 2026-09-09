@@ -439,9 +439,10 @@ public class DiagralDiscoveryService extends AbstractThingHandlerDiscoveryServic
      * on its type code and reference code.
      *
      * <p>
-     * Only used by {@link #discoverSensors} - sirens/keypads/transmitters/cameras each come from their
-     * own separate API list and always map to one fixed thing type (see {@link #discoverSirens} etc.),
-     * so they don't need this per-device classification.
+     * Only used by {@link #classifySensor} - sirens/keypads/cameras each come from their own separate API
+     * list and always map to one fixed thing type (see {@link #fixedKind}), and transmitters are
+     * classified by their {@code isPlug} flag instead (see {@link #classifyTransmitter}), so none of those
+     * categories need this per-device classification.
      * </p>
      *
      * <p>
