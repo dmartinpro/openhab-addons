@@ -66,7 +66,7 @@
 		<semantic-equipment-tag>ContactSensor</semantic-equipment-tag>
 
 		<channels>
-			<channel id="contact" typeId="system.contact"/>
+			<channel id="contact" typeId="contact"/>
 			<channel id="enabled" typeId="device-enabled"/>
 			<!--channel id="battery-level" typeId="system.battery-level"/ -->
 			<channel id="low-battery" typeId="system.low-battery"/>
@@ -248,6 +248,18 @@
 		<label>Anomaly Count</label>
 		<description>Number of active anomalies in the system</description>
 		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="contact">
+		<item-type>Contact</item-type>
+		<label>Contact</label>
+		<description>Open/closed state of the door or window (always UNDEF - the Diagral cloud API exposes no
+			real-time contact
+			state)</description>
+		<state readOnly="true"/>
+		<tags>
+			<tag>OpenState</tag>
+		</tags>
 	</channel-type>
 
 	<channel-type id="group-batch-activate" advanced="true">
