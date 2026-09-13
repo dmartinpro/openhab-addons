@@ -146,6 +146,20 @@ public class DiagralBridgeHandlerFakeApiIntegrationTest {
     }
 
     /**
+     * Reads one of the handler's private {@code static} fields, mirroring {@code DiagralBridgeHandlerTest}'s
+     * helper of the same name - used so a test can assert against the real tuning constant rather than
+     * duplicating its value as a second, driftable magic number.
+     *
+     * @param name the field name
+     * @return the field's current value
+     */
+    private static @Nullable Object getStatic(String name) throws Exception {
+        Field field = DiagralBridgeHandler.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(null);
+    }
+
+    /**
      * Invokes the handler's private {@code poll()}, exactly as the scheduled job or a command's
      * follow-up re-poll would.
      */
@@ -399,5 +413,69 @@ public class DiagralBridgeHandlerFakeApiIntegrationTest {
         invokePoll();
 
         assertThat(fakeServer.getRequestLog().size(), equalTo(requestsBeforePoll));
+    }
+
+    /**
+     * Counts how many requests in the fake server's log hit a given endpoint path suffix - used by the
+     * command-deduplication tests below to check how many times the real signed request actually reached
+     * the (fake) network, as opposed to how many times the bridge method was called.
+     *
+     * @param pathSuffix a distinguishing suffix of the endpoint path, e.g. {@code "/activate_group"}
+     * @return the number of logged requests whose path ends with {@code pathSuffix}
+     */
+    private long countRequestsTo(String pathSuffix) {
+        return fakeServer.getRequestLog().stream().filter(r -> r.path().endsWith(pathSuffix)).count();
+    }
+
+    /**
+     * The double-click scenario end to end, through the real client/HMAC-signing/fake-server stack rather
+     * than a mock: two identical commands dispatched back to back must result in exactly one real signed
+     * request reaching the API. This is the sequential shape a UI double-click actually produces most of
+     * the time (the first call has often already returned by the time the second is dispatched) -
+     * {@code DiagralBridgeHandlerTest} additionally proves the genuinely-concurrent case with a mock, which
+     * is harder to force deterministically against this fake.
+     */
+    @Test
+    public void duplicateGroupActivationSendsOnlyOneRealRequest() throws Exception {
+        fakeServer.setTransitionReads(0);
+        invokeAuthenticate();
+
+        handler.activateGroup("2");
+        handler.activateGroup("2");
+
+        assertThat(countRequestsTo("/activate_group"), equalTo(1L));
+    }
+
+    /**
+     * Deduplication must not become an accidental "one group command at a time" throttle - activating two
+     * different groups back to back must reach the API twice, not once.
+     */
+    @Test
+    public void activatingDifferentGroupsBothSendRealRequests() throws Exception {
+        fakeServer.setTransitionReads(0);
+        invokeAuthenticate();
+
+        handler.activateGroup("2");
+        handler.activateGroup("3");
+
+        assertThat(countRequestsTo("/activate_group"), equalTo(2L));
+    }
+
+    /**
+     * Once {@code COMMAND_DEDUPLICATION_WINDOW_MS} has elapsed, a repeated command is a deliberate new
+     * action again and must reach the real API a second time - the rejection above is temporary, not a
+     * standing "this exact command may never be repeated" rule.
+     */
+    @Test
+    public void duplicateGroupActivationAfterTheWindowSendsASecondRealRequest() throws Exception {
+        fakeServer.setTransitionReads(0);
+        invokeAuthenticate();
+        long windowMillis = (Long) Objects.requireNonNull(getStatic("COMMAND_DEDUPLICATION_WINDOW_MS"));
+
+        handler.activateGroup("2");
+        Thread.sleep(windowMillis + 500);
+        handler.activateGroup("2");
+
+        assertThat(countRequestsTo("/activate_group"), equalTo(2L));
     }
 }

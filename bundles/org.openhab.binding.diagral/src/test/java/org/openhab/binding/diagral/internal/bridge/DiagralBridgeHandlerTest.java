@@ -16,6 +16,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.MODE_OFF;
+import static org.openhab.binding.diagral.internal.DiagralBindingConstants.PRODUCT_TYPE_SENSOR;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -108,6 +110,20 @@ public class DiagralBridgeHandlerTest {
         Field field = DiagralBridgeHandler.class.getDeclaredField(name);
         field.setAccessible(true);
         return field.get(handler);
+    }
+
+    /**
+     * Reads one of the handler's private {@code static} fields (e.g. a tuning constant), rather than an
+     * instance field - used so a test can assert against the real constant instead of duplicating its
+     * value as a second, driftable magic number.
+     *
+     * @param name the field name
+     * @return the field's current value
+     */
+    private static @Nullable Object getStatic(String name) throws Exception {
+        Field field = DiagralBridgeHandler.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(null);
     }
 
     /**
@@ -790,6 +806,102 @@ public class DiagralBridgeHandlerTest {
         handler.activateGroups(List.of("1", "2"));
 
         verify(diagralHttpClient, timeout(1000).times(1)).getSystemStatus();
+    }
+
+    /**
+     * An exact duplicate command arriving while the first is genuinely still executing must be rejected
+     * outright - the underlying API call happens exactly once. Forces true overlap with a latch inside the
+     * mocked client call, from a second thread, rather than just calling twice in a row on one thread,
+     * which would only prove the sequential case (covered separately below).
+     */
+    @Test
+    public void concurrentDuplicateCommandIsRejectedWhileFirstIsInProgress() throws Exception {
+        CountDownLatch firstCallStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstCall = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            firstCallStarted.countDown();
+            assertThat("first call was not released in time", releaseFirstCall.await(5, TimeUnit.SECONDS), is(true));
+            return null;
+        }).when(diagralHttpClient).activateGroup("3");
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        Thread firstCaller = new Thread(() -> handler.activateGroup("3"));
+        firstCaller.start();
+        assertThat("first call never reached the client", firstCallStarted.await(5, TimeUnit.SECONDS), is(true));
+
+        // The first call is now genuinely blocked inside the mocked client - an exact duplicate arriving
+        // right now must be rejected before it ever reaches the client.
+        handler.activateGroup("3");
+
+        releaseFirstCall.countDown();
+        firstCaller.join(5000);
+        verify(diagralHttpClient, times(1)).activateGroup("3");
+    }
+
+    /**
+     * The same duplicate rejection for two commands dispatched sequentially rather than concurrently - the
+     * more common shape for a double-click, since the first call may well have already returned by the
+     * time the second is dispatched. This is what {@code COMMAND_DEDUPLICATION_WINDOW_MS} is for; without
+     * it, only the concurrent case above would be caught.
+     */
+    @Test
+    public void sequentialDuplicateCommandIsRejectedImmediatelyAfterTheFirst() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        handler.activateGroup("3");
+        handler.activateGroup("3");
+
+        verify(diagralHttpClient, times(1)).activateGroup("3");
+    }
+
+    /**
+     * Deduplication is keyed by the exact command, not a single system-wide lock - a different group (or a
+     * different action entirely) must never be blocked by an unrelated command still settling.
+     */
+    @Test
+    public void differentCommandsAreNeverDeduplicatedAgainstEachOther() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        handler.activateGroup("3");
+        handler.activateGroup("5");
+        handler.disableGroup("3");
+        handler.setSystemMode(MODE_OFF);
+
+        verify(diagralHttpClient, times(1)).activateGroup("3");
+        verify(diagralHttpClient, times(1)).activateGroup("5");
+        verify(diagralHttpClient, times(1)).disableGroup("3");
+        verify(diagralHttpClient, times(1)).setSystemMode(MODE_OFF);
+    }
+
+    /**
+     * The rejection is temporary: once {@code COMMAND_DEDUPLICATION_WINDOW_MS} has elapsed since the first
+     * call finished, a repeat of the same command is a deliberate new action again, not a double-click
+     * echo, and must go through normally.
+     */
+    @Test
+    public void duplicateCommandIsAllowedThroughAgainAfterTheDeduplicationWindow() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+        long windowMillis = (Long) Objects.requireNonNull(getStatic("COMMAND_DEDUPLICATION_WINDOW_MS"));
+
+        handler.activateGroup("3");
+        Thread.sleep(windowMillis + 500);
+        handler.activateGroup("3");
+
+        verify(diagralHttpClient, times(2)).activateGroup("3");
+    }
+
+    /**
+     * {@code deviceCommand} (used by enable/disable) delegates to the same guarded {@code command} helper,
+     * so it must reject an exact duplicate the same way the group/mode commands do.
+     */
+    @Test
+    public void duplicateDeviceCommandIsRejected() throws Exception {
+        when(diagralHttpClient.getSystemStatus()).thenReturn(new DiagralSystemStatus());
+
+        handler.enableDevice(PRODUCT_TYPE_SENSOR, 5);
+        handler.enableDevice(PRODUCT_TYPE_SENSOR, 5);
+
+        verify(diagralHttpClient, times(1)).enableProduct(PRODUCT_TYPE_SENSOR, 5);
     }
 
     /** LEARNING_MODE is not an armed state and has no per-group detail; it uses the same fallback. */

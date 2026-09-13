@@ -136,6 +136,23 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      */
     private static final long MAX_BACKOFF_MS = 600_000;
 
+    /**
+     * How long a command stays "busy" in {@link #commandsInProgress} after it finishes, on top of however
+     * long the HTTP call itself took.
+     *
+     * <p>
+     * Exists to reject an exact-duplicate command arriving from a double-click/double-tap - live-observed
+     * against a widget that can fire the same command twice in quick succession. The in-flight duration
+     * (naturally as long as the HTTP call takes, up to the full request timeout) already rejects a
+     * duplicate that overlaps the first; this grace period additionally covers a duplicate that arrives
+     * just <em>after</em> the first one finished, which a purely in-flight guard would miss if the two
+     * commands happen to be dispatched sequentially rather than concurrently. Deliberately short - long
+     * enough to absorb typical double-click/double-tap jitter, nowhere near long enough to swallow a
+     * deliberate second press a few seconds later (e.g. the user unsure the first one registered).
+     * </p>
+     */
+    private static final long COMMAND_DEDUPLICATION_WINDOW_MS = 1500;
+
     private final Logger logger = LoggerFactory.getLogger(DiagralBridgeHandler.class);
 
     private final HttpClient httpClient;
@@ -240,6 +257,19 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * </p>
      */
     private final ReentrantLock statusFetchLock = new ReentrantLock();
+
+    /**
+     * Commands currently executing, or that finished within the last {@link #COMMAND_DEDUPLICATION_WINDOW_MS},
+     * keyed by the same description string {@link #command(String, ClientCommand)} already logs with.
+     *
+     * <p>
+     * A concurrent set rather than a lock: unlike {@link #pollLock}, two <em>different</em> commands (e.g.
+     * a group activation racing a mode change) must be free to run at the same time - only an exact repeat
+     * of a command already in this set gets rejected. {@code add()} both tests and marks atomically, so
+     * two threads racing to add the same key can never both win.
+     * </p>
+     */
+    private final Set<String> commandsInProgress = ConcurrentHashMap.newKeySet();
 
     /**
      * Set once {@link #dispose()} has run, so work already scheduled - in particular the
@@ -944,13 +974,27 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
      * scheduled interval.
      * </p>
      *
-     * @param description what is being done, used in the log messages
+     * <p>
+     * An exact duplicate of a command already in {@link #commandsInProgress} - live-observed from a widget
+     * that can fire the same command twice on a single double-click/double-tap - is rejected outright,
+     * before it ever reaches the HTTP client: no request is sent, and no extra re-poll is scheduled either
+     * (the original call's own re-poll already covers it). See {@link #commandsInProgress}'s Javadoc for
+     * why this is a set keyed by description rather than a single lock, and
+     * {@link #COMMAND_DEDUPLICATION_WINDOW_MS}'s Javadoc for why the key outlives the call itself.
+     * </p>
+     *
+     * @param description what is being done, used in the log messages and as the deduplication key
      * @param command the call to make, plus any bookkeeping that should only happen on success
      */
     private void command(String description, ClientCommand command) {
         DiagralHttpClient client = diagralHttpClient;
         if (client == null) {
             logger.warn("Cannot {} - HTTP client not initialized", description);
+            return;
+        }
+
+        if (!commandsInProgress.add(description)) {
+            logger.debug("Ignoring duplicate command - already in progress or just completed: {}", description);
             return;
         }
 
@@ -961,6 +1005,8 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // re-poll below is what resolves the real state.
             logger.warn("Failed to {}: {}", description, e.getMessage());
         } finally {
+            scheduler.schedule(() -> commandsInProgress.remove(description), COMMAND_DEDUPLICATION_WINDOW_MS,
+                    TimeUnit.MILLISECONDS);
             scheduler.execute(this::poll);
         }
     }
