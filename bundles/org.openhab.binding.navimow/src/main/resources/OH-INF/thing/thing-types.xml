@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<thing:thing-descriptions bindingId="navimow"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:thing="https://openhab.org/schemas/thing-description/v1.0.0"
+	xsi:schemaLocation="https://openhab.org/schemas/thing-description/v1.0.0 https://openhab.org/schemas/thing-description-1.0.0.xsd">
+
+	<bridge-type id="account">
+		<label>Navimow Account</label>
+		<description>
+			A Segway Navimow cloud account. Authorization happens through a browser-based login
+			flow: once this bridge
+			is created, check its status for a link to sign in.
+		</description>
+
+		<config-description>
+			<parameter name="pollingInterval" type="integer" unit="s" min="10">
+				<label>Polling Interval</label>
+				<description>How often, in seconds, to poll the cloud API for mower status.</description>
+				<default>60</default>
+				<advanced>true</advanced>
+			</parameter>
+		</config-description>
+	</bridge-type>
+
+	<thing-type id="mower">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="account"/>
+		</supported-bridge-type-refs>
+
+		<label>Navimow Mower</label>
+		<description>A Navimow robotic lawn mower linked to a Navimow account.</description>
+		<semantic-equipment-tag>LawnMower</semantic-equipment-tag>
+		<channels>
+			<channel id="activity" typeId="activity"/>
+			<channel id="control" typeId="control"/>
+			<channel id="battery-level" typeId="system.battery-level"/>
+		</channels>
+
+		<representation-property>id</representation-property>
+
+		<config-description>
+			<parameter name="id" type="text" required="true">
+				<label>Device ID</label>
+				<description>The device id as reported by the cloud API. Normally filled in automatically by discovery.</description>
+			</parameter>
+		</config-description>
+	</thing-type>
+
+	<channel-type id="activity">
+		<item-type>String</item-type>
+		<label>Activity</label>
+		<description>The mower's current canonical activity, normalized from the cloud API's raw state.</description>
+		<state readOnly="true">
+			<options>
+				<option value="idle">Idle</option>
+				<option value="mowing">Mowing</option>
+				<option value="paused">Paused</option>
+				<option value="docked">Docked</option>
+				<option value="charging">Charging</option>
+				<option value="returning">Returning</option>
+				<option value="error">Error</option>
+				<option value="unknown">Unknown</option>
+			</options>
+		</state>
+	</channel-type>
+
+	<channel-type id="control">
+		<item-type>String</item-type>
+		<label>Control</label>
+		<description>Sends a command to the mower.</description>
+		<command>
+			<options>
+				<option value="START">Start Mowing</option>
+				<option value="PAUSE">Pause</option>
+				<option value="RESUME">Resume</option>
+				<option value="DOCK">Return to Dock</option>
+			</options>
+		</command>
+	</channel-type>
+</thing:thing-descriptions>
