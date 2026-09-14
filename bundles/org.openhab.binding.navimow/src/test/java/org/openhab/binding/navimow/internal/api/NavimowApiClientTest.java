@@ -120,6 +120,18 @@ class NavimowApiClientTest {
     }
 
     @Test
+    void getDevicesThrowsAuthenticationExceptionOnBusinessCodeOAuthInfoIllegal() {
+        // Live-observed 2026-09-14: the real API can report an invalid/expired token as HTTP 200
+        // with this exact business code/desc instead of HTTP 401/403 (see
+        // NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL for the full story).
+        stubFor(get(urlPathEqualTo("/openapi/smarthome/authList"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"code\":4005,\"desc\":\"CODE_OAUTH_INFO_ILLEGAL\"}")));
+
+        assertThrows(NavimowAuthenticationException.class, () -> apiClient.getDevices());
+    }
+
+    @Test
     void getDevicesThrowsCommunicationExceptionOnHttp500() {
         stubFor(get(urlPathEqualTo("/openapi/smarthome/authList")).willReturn(aResponse().withStatus(500)));
 

@@ -194,11 +194,24 @@ public class NavimowApiClient {
         }
     }
 
-    private void requireSuccess(NavimowApiEnvelope<?> response, String endpoint) throws NavimowCommunicationException {
-        if (!response.isSuccess()) {
-            throw new NavimowCommunicationException(
-                    endpoint + " failed with code " + response.code + ": " + response.desc);
+    private void requireSuccess(NavimowApiEnvelope<?> response, String endpoint)
+            throws NavimowAuthenticationException, NavimowCommunicationException {
+        if (response.isSuccess()) {
+            return;
         }
+        /*
+         * The cloud API can report an invalid/expired access token as a business-level failure
+         * (HTTP 200, body {"code":4005,"desc":"CODE_OAUTH_INFO_ILLEGAL"}) rather than an HTTP
+         * 401/403 - see NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL for how this was
+         * found and its confirmation status. Without this check, that case would be misclassified
+         * as a generic communication error instead of triggering re-authentication.
+         */
+        if (response.code == NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL
+                || NavimowBindingConstants.BUSINESS_DESC_OAUTH_INFO_ILLEGAL.equals(response.desc)) {
+            throw new NavimowAuthenticationException(
+                    endpoint + " rejected the access token (code " + response.code + ": " + response.desc + ")");
+        }
+        throw new NavimowCommunicationException(endpoint + " failed with code " + response.code + ": " + response.desc);
     }
 
     private <T> T get(String path, Type responseType)

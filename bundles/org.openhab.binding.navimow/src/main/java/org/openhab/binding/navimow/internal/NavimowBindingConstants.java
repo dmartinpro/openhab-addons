@@ -15,6 +15,8 @@ package org.openhab.binding.navimow.internal;
 import java.util.Set;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
+import org.openhab.binding.navimow.internal.api.NavimowApiClient;
+import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
 import org.openhab.core.thing.ThingTypeUID;
 
 /**
@@ -84,4 +86,30 @@ public class NavimowBindingConstants {
 
     /** Default REST polling interval in seconds, used when the bridge config leaves it unset. */
     public static final int DEFAULT_POLLING_INTERVAL_S = 60;
+
+    /**
+     * Business-level "code" value the cloud API uses to report an invalid/expired access token.
+     *
+     * <p>
+     * <b>Live-observed 2026-09-14</b> against the real API on a genuinely expired token: the
+     * response was HTTP 200 with body {@code {"code":4005,"desc":"CODE_OAUTH_INFO_ILLEGAL"}} - not
+     * an HTTP 401/403. Only directly confirmed on {@code mqtt/userInfo/get/v2} (not a REST call this
+     * binding makes); however, the independent {@code niddu85/home-assistant-navimow} plugin's
+     * source treats this exact {@code code}/{@code desc} pair as its "token expired, needs refresh"
+     * signal specifically on {@code getVehicleStatus} - one of the endpoints this binding does call -
+     * which is why {@link NavimowApiClient} generalizes the check to every endpoint rather than just
+     * the one it was directly observed on.
+     *
+     * <p>
+     * <b>Not yet reconfirmed against this binding's own {@code authList}/{@code getVehicleStatus}/
+     * {@code sendCommands} calls in the wild.</b> Worth checking the logs after this has been running
+     * for a while: if {@link NavimowAuthenticationException} is never actually triggered by this path
+     * (only by real HTTP 401/403), either this account/token combination never hits it in practice, or
+     * the generalization from the community plugin doesn't hold - in which case this check is dead
+     * code, not a fix.
+     */
+    public static final int BUSINESS_CODE_OAUTH_INFO_ILLEGAL = 4005;
+
+    /** @see #BUSINESS_CODE_OAUTH_INFO_ILLEGAL */
+    public static final String BUSINESS_DESC_OAUTH_INFO_ILLEGAL = "CODE_OAUTH_INFO_ILLEGAL";
 }
