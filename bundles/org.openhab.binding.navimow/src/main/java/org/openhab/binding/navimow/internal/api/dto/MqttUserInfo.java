@@ -16,10 +16,14 @@ import org.eclipse.jdt.annotation.Nullable;
 
 /**
  * {@link MqttUserInfo} is the {@code data} object of the {@code mqtt/userInfo/get/v2} response:
- * broker connection details for the account's MQTT push channel. Field names are taken from the
- * official {@code navimow-sdk} Python package ({@code mqttHost}, {@code mqttUrl}, {@code userName},
- * {@code pwdInfo}). See {@code NavimowApiClientMqttUserInfoLiveTest} for this shape's live
- * confirmation status against a real response.
+ * broker connection details for the account's MQTT push channel.
+ *
+ * <p>
+ * <b>Live-confirmed 2026-09-15</b>, with all four fields present in a genuine successful response
+ * (called in-process from {@code NavimowAccountHandler}, using the account bridge's own
+ * already-bound OAuth session - see {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL}
+ * for why every earlier external attempt had failed regardless of endpoint). Observed shape:
+ * {@code mqttHost} a {@code wss://} URL, {@code mqttUrl} a path of the form {@code /mqtt/<numeric-id>}.
  *
  * <p>
  * Not currently used anywhere in this binding - it exists to make the endpoint testable in

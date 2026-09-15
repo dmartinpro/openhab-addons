@@ -135,8 +135,15 @@ public class NavimowBindingConstants {
      * code running inside that same bridge process can. This is why {@link NavimowApiClient}'s own
      * {@code authList}/{@code getVehicleStatus}/{@code sendCommands} calls have never independently
      * triggered this code (they always run as the bridge itself) while every deliberate external probe
-     * has hit it on every endpoint tried. Not itself proof the check in {@code requireSuccess} is
-     * correctly scoped - just proof that testing it externally can no longer tell us more.
+     * has hit it on every endpoint tried.
+     *
+     * <p>
+     * <b>Confirmed 2026-09-15, definitively.</b> A one-off diagnostic call to {@code mqtt/userInfo},
+     * made from inside {@code NavimowAccountHandler} itself (the account bridge's own already-bound
+     * session, not a copied token used elsewhere), succeeded immediately with a real, complete
+     * response. This proves the theory above rather than just being consistent with it:
+     * {@code mqtt/userInfo} was never broken, and this business code was never really about MQTT -
+     * every prior failure was purely about which process was asking.
      */
     public static final int BUSINESS_CODE_OAUTH_INFO_ILLEGAL = 4005;
 
