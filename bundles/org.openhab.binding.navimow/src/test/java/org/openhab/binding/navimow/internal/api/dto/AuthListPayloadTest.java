@@ -34,15 +34,16 @@ class AuthListPayloadTest {
 
     @Test
     void parsesRealisticAuthListResponse() {
+        // Exact shape live-confirmed 2026-09-15 against a real Navimow X430.
         String json = """
                 {
                   "code": 1,
-                  "desc": "success",
+                  "desc": "Operation successful",
                   "data": {
+                    "requestId": "07ae0df4-e700-47f4-81d0-3cfde662f80d",
                     "payload": {
                       "devices": [
-                        { "id": "device-1", "name": "Front Lawn", "online": true },
-                        { "id": "device-2", "name": "Back Lawn", "online": false }
+                        { "id": "22AAD2602Y0911", "name": "Navimow X430", "model": "X430", "firmware": "005D" }
                       ]
                     }
                   }
@@ -54,15 +55,13 @@ class AuthListPayloadTest {
         NavimowApiEnvelope<AuthListPayload> envelope = gson.fromJson(json, type);
 
         assertThat(envelope.isSuccess(), is(true));
-        assertThat(envelope.data.payload.devices, hasSize(2));
+        assertThat(envelope.data.payload.devices, hasSize(1));
 
-        NavimowDevice first = envelope.data.payload.devices.get(0);
-        assertThat(first.id, is("device-1"));
-        assertThat(first.name, is("Front Lawn"));
-        assertThat(first.online, is(true));
-
-        NavimowDevice second = envelope.data.payload.devices.get(1);
-        assertThat(second.online, is(false));
+        NavimowDevice device = envelope.data.payload.devices.get(0);
+        assertThat(device.id, is("22AAD2602Y0911"));
+        assertThat(device.name, is("Navimow X430"));
+        assertThat(device.model, is("X430"));
+        assertThat(device.firmware, is("005D"));
     }
 
     @Test

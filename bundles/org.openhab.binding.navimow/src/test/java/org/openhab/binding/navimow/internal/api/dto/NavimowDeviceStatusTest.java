@@ -35,22 +35,25 @@ class NavimowDeviceStatusTest {
 
     @Test
     void parsesRealisticGetVehicleStatusResponse() {
+        // Exact shape live-confirmed 2026-09-15 against a real Navimow X430 while mowing.
         String json = """
                 {
                   "code": 1,
-                  "desc": "success",
+                  "desc": "Operation successful",
                   "data": {
                     "payload": {
                       "devices": [
                         {
-                          "id": "device-1",
-                          "vehicleState": "isMapping",
+                          "id": "22AAD2602Y0911",
+                          "vehicleState": "isRunning",
                           "capacityRemaining": [
-                            { "unit": "PERCENTAGE", "rawValue": 87 }
-                          ]
+                            { "unit": "PERCENTAGE", "rawValue": 85 }
+                          ],
+                          "descriptiveCapacityRemaining": "HIGH"
                         }
                       ]
-                    }
+                    },
+                    "requestId": "62bb3e47-c539-467b-8c46-595396c34b1c"
                   }
                 }
                 """;
@@ -61,9 +64,10 @@ class NavimowDeviceStatusTest {
 
         assertThat(envelope.isSuccess(), is(true));
         NavimowDeviceStatus status = envelope.data.payload.devices.get(0);
-        assertThat(status.id, is("device-1"));
-        assertThat(status.vehicleState, is("isMapping"));
-        assertThat(status.getBatteryPercentage(), is(87));
+        assertThat(status.id, is("22AAD2602Y0911"));
+        assertThat(status.vehicleState, is("isRunning"));
+        assertThat(status.getBatteryPercentage(), is(85));
+        assertThat(status.descriptiveCapacityRemaining, is("HIGH"));
     }
 
     @Test

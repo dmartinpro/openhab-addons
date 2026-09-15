@@ -21,12 +21,19 @@ import org.eclipse.jdt.annotation.Nullable;
  * endpoint.
  *
  * <p>
- * {@code id}, {@code vehicleState} and {@code capacityRemaining} are confirmed against a real
- * payload - an independent, non-defensive Home Assistant integration reads these three fields
- * directly off this exact endpoint's response. {@code position} and {@code signal_strength} are
- * deliberately not modelled here: the same source only ever populates those two fields from MQTT
- * push messages, never from this REST endpoint, so their presence here is unconfirmed and this
- * binding does not yet use MQTT.
+ * {@code id}, {@code vehicleState} and {@code capacityRemaining} were confirmed against a real
+ * payload from the start (an independent, non-defensive Home Assistant integration reads these
+ * three fields directly off this exact endpoint's response). {@code descriptiveCapacityRemaining}
+ * was found and confirmed <b>live on 2026-09-15</b> during a full command-cycle test against a real
+ * Navimow X430 - a human-readable battery tier (observed value: {@code "HIGH"} at 85%); its full
+ * value set (e.g. whether {@code MEDIUM}/{@code LOW} exist) is not yet known. Across that same test,
+ * {@code vehicleState} was also directly observed taking the values {@code isRunning}, {@code
+ * isPaused}, {@code isDocking} and {@code isDocked} in sequence, each mapping correctly onto
+ * {@link NavimowActivity}. {@code position} and {@code signal_strength} are deliberately not
+ * modelled here: the same HA integration source only ever populates those two fields from MQTT push
+ * messages, never from this REST endpoint, and this binding does not yet use MQTT - live testing
+ * that same day found no {@code position} field on this endpoint's real response either, confirming
+ * that omission rather than just inferring it.
  *
  * @author David Martin - Initial contribution
  */
@@ -38,6 +45,9 @@ public class NavimowDeviceStatus {
     public @Nullable String vehicleState;
 
     public @Nullable List<CapacityRemainingItem> capacityRemaining;
+
+    /** Human-readable battery tier, e.g. {@code "HIGH"}. See the class Javadoc for confirmation status. */
+    public @Nullable String descriptiveCapacityRemaining;
 
     /**
      * Extracts the battery percentage from {@link #capacityRemaining}.

@@ -36,6 +36,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openhab.binding.navimow.internal.api.dto.MqttUserInfo;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDevice;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
@@ -79,8 +80,9 @@ class NavimowApiClientTest {
     void setUp() {
         WireMock.configureFor("localhost", WIREMOCK_SERVER.port());
         WireMock.reset();
-        apiClient = new NavimowApiClient(HTTP_CLIENT,
-                "http://localhost:" + WIREMOCK_SERVER.port() + "/openapi/smarthome", () -> TEST_TOKEN);
+        String base = "http://localhost:" + WIREMOCK_SERVER.port();
+        apiClient = new NavimowApiClient(HTTP_CLIENT, base + "/openapi/smarthome",
+                base + "/openapi/mqtt/userInfo/get/v2", () -> TEST_TOKEN);
     }
 
     @AfterEach
@@ -198,5 +200,43 @@ class NavimowApiClientTest {
 
         assertThrows(NavimowCommunicationException.class,
                 () -> apiClient.sendCommand("device-1", NavimowCommand.START));
+    }
+
+    @Test
+    void getMqttUserInfoParsesSuccessfulResponse() throws Exception {
+        // Response shape confirmed from the official navimow-sdk: "data" carries fields directly,
+        // not nested under a further "payload" object like the smarthome endpoints.
+        stubFor(get(urlPathEqualTo("/openapi/mqtt/userInfo/get/v2"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody("""
+                        {"code":1,"desc":"success","data":{
+                          "mqttHost":"mqtt.example.test","mqttUrl":"/mqtt","userName":"user1","pwdInfo":"secret"
+                        }}
+                        """)));
+
+        MqttUserInfo info = apiClient.getMqttUserInfo();
+
+        assertThat(info.mqttHost, is("mqtt.example.test"));
+        assertThat(info.mqttUrl, is("/mqtt"));
+        assertThat(info.userName, is("user1"));
+        assertThat(info.pwdInfo, is("secret"));
+    }
+
+    @Test
+    void getMqttUserInfoThrowsAuthenticationExceptionOnBusinessCodeOAuthInfoIllegal() {
+        // This is the exact response live-observed against the real API - see
+        // NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL for the full story.
+        stubFor(get(urlPathEqualTo("/openapi/mqtt/userInfo/get/v2"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"code\":4005,\"desc\":\"CODE_OAUTH_INFO_ILLEGAL\"}")));
+
+        assertThrows(NavimowAuthenticationException.class, () -> apiClient.getMqttUserInfo());
+    }
+
+    @Test
+    void getMqttUserInfoThrowsCommunicationExceptionOnOtherBusinessFailure() {
+        stubFor(get(urlPathEqualTo("/openapi/mqtt/userInfo/get/v2")).willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json").withBody("{\"code\":0,\"desc\":\"unknown error\"}")));
+
+        assertThrows(NavimowCommunicationException.class, () -> apiClient.getMqttUserInfo());
     }
 }

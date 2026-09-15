@@ -40,6 +40,8 @@ import org.openhab.binding.navimow.internal.NavimowBindingConstants;
 import org.openhab.binding.navimow.internal.api.dto.AuthListPayload;
 import org.openhab.binding.navimow.internal.api.dto.DeviceRef;
 import org.openhab.binding.navimow.internal.api.dto.GetVehicleStatusRequest;
+import org.openhab.binding.navimow.internal.api.dto.MqttUserInfo;
+import org.openhab.binding.navimow.internal.api.dto.MqttUserInfoResponse;
 import org.openhab.binding.navimow.internal.api.dto.NavimowApiEnvelope;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDevice;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
@@ -65,6 +67,21 @@ import com.google.gson.reflect.TypeToken;
  * acquisition/refresh stays the bridge handler's responsibility (through openHAB's
  * {@code OAuthClientService}).
  *
+ * <p>
+ * <b>Testing this API from a different network origin than the account bridge itself is
+ * unreliable.</b> Live tests on 2026-09-15 found standalone calls to {@code mqtt/userInfo} - both
+ * via {@code curl} and via a separate Java process using the same Jetty {@code HttpClient} library
+ * this class uses - consistently rejected with a business-level "invalid token" response, while this
+ * class's own calls (running inside the account bridge's Docker container) succeeded throughout the
+ * identical time window. Since a genuine Jetty client failed the same way {@code curl} did, the cause
+ * is not "ad-hoc tool vs. real client" as first suspected - the one remaining common factor across
+ * every failing attempt is network origin: both the {@code curl} calls and the standalone Java test
+ * ran from the developer's host machine, a different egress IP than the container. That fits an
+ * IP/origin-bound access token. See
+ * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full writeup. Practically:
+ * a negative result against this API from a different network origin than the account bridge itself
+ * does not reliably say anything about the endpoint - only a call from the same origin does.
+ *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
@@ -75,6 +92,7 @@ public class NavimowApiClient {
     private final Logger logger = LoggerFactory.getLogger(NavimowApiClient.class);
     private final HttpClient httpClient;
     private final String baseUrl;
+    private final String mqttUserInfoUrl;
     private final NavimowAuthorizationProvider authorizationProvider;
     private final Gson gson = new Gson();
 
@@ -83,7 +101,8 @@ public class NavimowApiClient {
      * @param authorizationProvider supplies a currently-valid bearer access token for each request
      */
     public NavimowApiClient(HttpClient httpClient, NavimowAuthorizationProvider authorizationProvider) {
-        this(httpClient, NavimowBindingConstants.API_BASE_URL, authorizationProvider);
+        this(httpClient, NavimowBindingConstants.API_BASE_URL, NavimowBindingConstants.MQTT_USER_INFO_URL,
+                authorizationProvider);
     }
 
     /**
@@ -94,8 +113,23 @@ public class NavimowApiClient {
      * @param authorizationProvider supplies a currently-valid bearer access token for each request
      */
     public NavimowApiClient(HttpClient httpClient, String baseUrl, NavimowAuthorizationProvider authorizationProvider) {
+        this(httpClient, baseUrl, NavimowBindingConstants.MQTT_USER_INFO_URL, authorizationProvider);
+    }
+
+    /**
+     * @param httpClient the shared Jetty client used to issue REST requests
+     * @param baseUrl the REST API base URL - see the two-argument overload's Javadoc
+     * @param mqttUserInfoUrl the {@code mqtt/userInfo} endpoint's full URL - separately overridable
+     *            since it lives under a different host path than {@code baseUrl} (see
+     *            {@link NavimowBindingConstants#MQTT_USER_INFO_URL}), so tests can redirect it to a
+     *            local stub server too instead of quietly falling through to Segway's live cloud
+     * @param authorizationProvider supplies a currently-valid bearer access token for each request
+     */
+    public NavimowApiClient(HttpClient httpClient, String baseUrl, String mqttUserInfoUrl,
+            NavimowAuthorizationProvider authorizationProvider) {
         this.httpClient = httpClient;
         this.baseUrl = baseUrl;
+        this.mqttUserInfoUrl = mqttUserInfoUrl;
         this.authorizationProvider = authorizationProvider;
     }
 
@@ -192,6 +226,40 @@ public class NavimowApiClient {
                 }
             }
         }
+    }
+
+    /**
+     * Fetches MQTT broker connection info for the authenticated account.
+     *
+     * <p>
+     * Not called by anything in this binding yet (REST-only for now) - exists so the endpoint is
+     * independently testable through a real client rather than only via ad-hoc tools. See the class
+     * Javadoc for why that distinction turned out to matter.
+     *
+     * @return the MQTT connection info
+     * @throws NavimowAuthenticationException if the access token was rejected
+     * @throws NavimowCommunicationException if the request failed, the endpoint reported a
+     *             non-success business code, or the response could not be parsed
+     */
+    public MqttUserInfo getMqttUserInfo() throws NavimowAuthenticationException, NavimowCommunicationException {
+        Request request = httpClient.newRequest(mqttUserInfoUrl).method(HttpMethod.GET);
+        MqttUserInfoResponse response = send(request, mqttUserInfoUrl, MqttUserInfoResponse.class);
+
+        if (!response.isSuccess()) {
+            if (response.code == NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL
+                    || NavimowBindingConstants.BUSINESS_DESC_OAUTH_INFO_ILLEGAL.equals(response.desc)) {
+                throw new NavimowAuthenticationException(
+                        "mqtt/userInfo rejected the access token (code " + response.code + ": " + response.desc + ")");
+            }
+            throw new NavimowCommunicationException(
+                    "mqtt/userInfo failed with code " + response.code + ": " + response.desc);
+        }
+
+        MqttUserInfo data = response.data;
+        if (data == null) {
+            throw new NavimowCommunicationException("mqtt/userInfo response had no data");
+        }
+        return data;
     }
 
     private void requireSuccess(NavimowApiEnvelope<?> response, String endpoint)

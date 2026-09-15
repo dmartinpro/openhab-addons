@@ -71,6 +71,7 @@
 		<command>
 			<options>
 				<option value="START">Start Mowing</option>
+				<option value="STOP">Stop</option>
 				<option value="PAUSE">Pause</option>
 				<option value="RESUME">Resume</option>
 				<option value="DOCK">Return to Dock</option>

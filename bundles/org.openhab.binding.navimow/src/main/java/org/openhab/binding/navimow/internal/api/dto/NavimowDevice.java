@@ -18,13 +18,17 @@ import org.eclipse.jdt.annotation.Nullable;
  * {@link NavimowDevice} represents one device entry returned by the {@code authList} endpoint.
  *
  * <p>
- * {@code id}, {@code name} and {@code online} are confirmed against a real payload (both
- * independent Home Assistant integrations read these directly, without defensive fallback, from
- * the same endpoint). Other fields commonly seen in reverse-engineered SDKs (model, firmware
- * version, serial number, MAC address) are deliberately not modelled here yet - neither community
- * source accesses them without a defensive multi-key fallback, meaning their real field names
- * are not actually confirmed. Add them once live testing against a real account confirms the
- * exact shape.
+ * <b>Live-confirmed 2026-09-15</b> against a real account/device (Navimow X430) - every field here
+ * reflects the exact, complete real response, not an inference:
+ *
+ * <pre>{@code {"id":"22AAD2602Y0911","name":"Navimow X430","model":"X430","firmware":"005D"}}</pre>
+ *
+ * <p>
+ * <b>There is no {@code online} field.</b> An earlier version of this class had one (defaulting to
+ * {@code false} and never actually read by any handler), based on the two community Home Assistant
+ * integrations defensively reading {@code .get("online", ...)}. The real response above proves that
+ * field does not exist on this endpoint for this account - removed rather than kept as a
+ * silently-wrong default.
  *
  * @author David Martin - Initial contribution
  */
@@ -34,5 +38,8 @@ public class NavimowDevice {
 
     public @Nullable String name;
 
-    public boolean online;
+    public @Nullable String model;
+
+    /** Firmware version string, e.g. {@code "005D"} - not confirmed to be human-readable/semver. */
+    public @Nullable String firmware;
 }

@@ -15,8 +15,6 @@ package org.openhab.binding.navimow.internal;
 import java.util.Set;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
-import org.openhab.binding.navimow.internal.api.NavimowApiClient;
-import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
 import org.openhab.core.thing.ThingTypeUID;
 
 /**
@@ -84,11 +82,21 @@ public class NavimowBindingConstants {
     public static final String API_PATH_GET_VEHICLE_STATUS = "/getVehicleStatus";
     public static final String API_PATH_SEND_COMMANDS = "/sendCommands";
 
+    /**
+     * MQTT broker connection-info endpoint. Lives under a different path prefix than
+     * {@link #API_BASE_URL} ({@code /openapi/mqtt/...} rather than {@code /openapi/smarthome/...}),
+     * and its response envelope has a different shape too - {@code data} carries the fields directly
+     * rather than nesting a further {@code payload} object - hence the dedicated
+     * {@code MqttUserInfoResponse} envelope rather than reusing {@code NavimowApiEnvelope}.
+     */
+    public static final String MQTT_USER_INFO_URL = "https://navimow-fra.ninebot.com/openapi/mqtt/userInfo/get/v2";
+
     /** Default REST polling interval in seconds, used when the bridge config leaves it unset. */
     public static final int DEFAULT_POLLING_INTERVAL_S = 60;
 
     /**
-     * Business-level "code" value the cloud API uses to report an invalid/expired access token.
+     * Business-level "code" value the cloud API uses to report an invalid/expired access token -
+     * <b>or possibly something else entirely; see the 2026-09-15 update below.</b>
      *
      * <p>
      * <b>Live-observed 2026-09-14</b> against the real API on a genuinely expired token: the
@@ -97,16 +105,41 @@ public class NavimowBindingConstants {
      * binding makes); however, the independent {@code niddu85/home-assistant-navimow} plugin's
      * source treats this exact {@code code}/{@code desc} pair as its "token expired, needs refresh"
      * signal specifically on {@code getVehicleStatus} - one of the endpoints this binding does call -
-     * which is why {@link NavimowApiClient} generalizes the check to every endpoint rather than just
+     * which is why {@code NavimowApiClient} generalizes the check to every endpoint rather than just
      * the one it was directly observed on.
      *
      * <p>
-     * <b>Not yet reconfirmed against this binding's own {@code authList}/{@code getVehicleStatus}/
-     * {@code sendCommands} calls in the wild.</b> Worth checking the logs after this has been running
-     * for a while: if {@link NavimowAuthenticationException} is never actually triggered by this path
-     * (only by real HTTP 401/403), either this account/token combination never hits it in practice, or
-     * the generalization from the community plugin doesn't hold - in which case this check is dead
-     * code, not a fix.
+     * <b>2026-09-15 update - reproduced again, but the "expired token" framing now looks doubtful.</b>
+     * During a live command-sequence test, a {@code STOP} command and every following status poll
+     * were issued as standalone HTTP calls (outside this binding's own client, since {@code STOP}
+     * wasn't part of {@code NavimowCommand} yet) using freshly-read, currently-valid access tokens -
+     * every single one got this exact {@code code}/{@code desc} back, while this binding's own real
+     * calls succeeded throughout the identical time window. That pattern - rejected consistently
+     * outside the real client, never once triggered by the real client - fits "the server is
+     * fingerprinting something about the request/client and rejecting ad-hoc ones" at least as well
+     * as "token expired", possibly better. If that reading is right, generalizing this code to mean
+     * "needs re-authentication" (as {@code NavimowApiClient#requireSuccess} currently does) could be
+     * the wrong response to it.
+     *
+     * <p>
+     * <b>2026-09-15, later the same day - the "ad-hoc client" theory was wrong; revised to network
+     * origin.</b> A manual Java test called {@code mqtt/userInfo} through a real Jetty
+     * {@code HttpClient} - the same library {@code NavimowApiClient} itself uses, not {@code curl} -
+     * and still got this exact {@code code}/{@code desc} back. Since a genuine Jetty client failed
+     * the same way {@code curl} did, "ad-hoc tool vs. real client" cannot be the distinguishing
+     * factor. The one thing every failing attempt still has in common: they all ran from the
+     * developer's host machine, a different network origin than the account bridge's own Docker
+     * container, whose calls succeeded throughout. The best-supported theory now is an IP/origin-bound
+     * access token, not a request-shape or client-identity check.
+     *
+     * <p>
+     * <b>Still not reconfirmed against this binding's own {@code authList}/{@code getVehicleStatus}/
+     * {@code sendCommands} calls.</b> That absence is now doing double duty as evidence: it's
+     * consistent with either "this account's token just hasn't expired at the wrong moment yet" or
+     * "this binding's own calls always originate from the account bridge's own container, so they
+     * never cross whatever origin check {@code mqtt/userInfo} applies." Worth checking the logs
+     * later: if {@code NavimowAuthenticationException} is only ever thrown by real HTTP 401/403,
+     * revisit whether this business-code check belongs here at all.
      */
     public static final int BUSINESS_CODE_OAUTH_INFO_ILLEGAL = 4005;
 

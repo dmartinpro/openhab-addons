@@ -32,6 +32,12 @@ class NavimowCommandTest {
     }
 
     @Test
+    void stopMapsToStartStopOff() {
+        assertThat(NavimowCommand.STOP.getExecutionCommand(), is("action.devices.commands.StartStop"));
+        assertThat(NavimowCommand.STOP.getParams(), is(java.util.Map.of("on", false)));
+    }
+
+    @Test
     void pauseMapsToPauseUnpauseOff() {
         assertThat(NavimowCommand.PAUSE.getExecutionCommand(), is("action.devices.commands.PauseUnpause"));
         assertThat(NavimowCommand.PAUSE.getParams(), is(java.util.Map.of("on", false)));
