@@ -95,51 +95,41 @@ public class NavimowBindingConstants {
     public static final int DEFAULT_POLLING_INTERVAL_S = 60;
 
     /**
-     * Business-level "code" value the cloud API uses to report an invalid/expired access token -
-     * <b>or possibly something else entirely; see the 2026-09-15 update below.</b>
+     * Business-level "code" value the cloud API uses to report an invalid/expired access token - or
+     * possibly something else; the true cause is still unknown despite three rounds of live testing.
+     * Response shape: HTTP 200 with body {@code {"code":4005,"desc":"CODE_OAUTH_INFO_ILLEGAL"}}, not
+     * an HTTP 401/403.
      *
      * <p>
-     * <b>Live-observed 2026-09-14</b> against the real API on a genuinely expired token: the
-     * response was HTTP 200 with body {@code {"code":4005,"desc":"CODE_OAUTH_INFO_ILLEGAL"}} - not
-     * an HTTP 401/403. Only directly confirmed on {@code mqtt/userInfo/get/v2} (not a REST call this
-     * binding makes); however, the independent {@code niddu85/home-assistant-navimow} plugin's
-     * source treats this exact {@code code}/{@code desc} pair as its "token expired, needs refresh"
-     * signal specifically on {@code getVehicleStatus} - one of the endpoints this binding does call -
-     * which is why {@code NavimowApiClient} generalizes the check to every endpoint rather than just
-     * the one it was directly observed on.
+     * <b>Ruled out, in order, each disproven by the next test:</b>
+     * <ol>
+     * <li>2026-09-14 - "token had genuinely expired." True in the one case that found this, but
+     * doesn't explain what came next.
+     * <li>2026-09-15 - "ad-hoc tool ({@code curl}) vs. this binding's real client." A {@code STOP}
+     * command and every status poll sent as standalone {@code curl} calls with fresh, valid tokens
+     * were all rejected while the binding's own calls succeeded in the same window - but then a
+     * standalone Java test using the same Jetty {@code HttpClient} library the binding itself uses
+     * failed identically, ruling out "curl specifically."
+     * <li>2026-09-15 - "network origin (IP) differs from the account bridge's container." Disproven by
+     * directly comparing egress IPs: the container and the host machine share the exact same public
+     * IP (both sit behind the same NAT), and a call made from inside the container itself (same
+     * network namespace the binding's successful calls run in) still failed identically.
+     * </ol>
      *
      * <p>
-     * <b>2026-09-15 update - reproduced again, but the "expired token" framing now looks doubtful.</b>
-     * During a live command-sequence test, a {@code STOP} command and every following status poll
-     * were issued as standalone HTTP calls (outside this binding's own client, since {@code STOP}
-     * wasn't part of {@code NavimowCommand} yet) using freshly-read, currently-valid access tokens -
-     * every single one got this exact {@code code}/{@code desc} back, while this binding's own real
-     * calls succeeded throughout the identical time window. That pattern - rejected consistently
-     * outside the real client, never once triggered by the real client - fits "the server is
-     * fingerprinting something about the request/client and rejecting ad-hoc ones" at least as well
-     * as "token expired", possibly better. If that reading is right, generalizing this code to mean
-     * "needs re-authentication" (as {@code NavimowApiClient#requireSuccess} currently does) could be
-     * the wrong response to it.
-     *
-     * <p>
-     * <b>2026-09-15, later the same day - the "ad-hoc client" theory was wrong; revised to network
-     * origin.</b> A manual Java test called {@code mqtt/userInfo} through a real Jetty
-     * {@code HttpClient} - the same library {@code NavimowApiClient} itself uses, not {@code curl} -
-     * and still got this exact {@code code}/{@code desc} back. Since a genuine Jetty client failed
-     * the same way {@code curl} did, "ad-hoc tool vs. real client" cannot be the distinguishing
-     * factor. The one thing every failing attempt still has in common: they all ran from the
-     * developer's host machine, a different network origin than the account bridge's own Docker
-     * container, whose calls succeeded throughout. The best-supported theory now is an IP/origin-bound
-     * access token, not a request-shape or client-identity check.
+     * <b>Still standing, untested:</b> TLS/HTTP fingerprinting (JA3-style signature, ALPN/HTTP2
+     * negotiation) differing between openHAB's shared {@code HttpClient} and any ad-hoc client; or
+     * some form of session/connection continuity tied to the original OAuth login rather than the
+     * bearer token alone. Not pursued further - each additional round means more probing of a
+     * production third-party service for a question this binding (REST-only, no MQTT) doesn't
+     * actually depend on the answer to.
      *
      * <p>
      * <b>Still not reconfirmed against this binding's own {@code authList}/{@code getVehicleStatus}/
-     * {@code sendCommands} calls.</b> That absence is now doing double duty as evidence: it's
-     * consistent with either "this account's token just hasn't expired at the wrong moment yet" or
-     * "this binding's own calls always originate from the account bridge's own container, so they
-     * never cross whatever origin check {@code mqtt/userInfo} applies." Worth checking the logs
-     * later: if {@code NavimowAuthenticationException} is only ever thrown by real HTTP 401/403,
-     * revisit whether this business-code check belongs here at all.
+     * {@code sendCommands} calls</b> - only ever seen via ad-hoc calls to {@code mqtt/userInfo} and,
+     * once, a standalone {@code sendCommands}/{@code getVehicleStatus} call. Worth checking the logs
+     * later: if {@code NavimowAuthenticationException} is only ever thrown by real HTTP 401/403 for
+     * this binding's own traffic, this business-code check may be doing nothing in practice.
      */
     public static final int BUSINESS_CODE_OAUTH_INFO_ILLEGAL = 4005;
 

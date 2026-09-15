@@ -68,19 +68,15 @@ import com.google.gson.reflect.TypeToken;
  * {@code OAuthClientService}).
  *
  * <p>
- * <b>Testing this API from a different network origin than the account bridge itself is
- * unreliable.</b> Live tests on 2026-09-15 found standalone calls to {@code mqtt/userInfo} - both
- * via {@code curl} and via a separate Java process using the same Jetty {@code HttpClient} library
- * this class uses - consistently rejected with a business-level "invalid token" response, while this
- * class's own calls (running inside the account bridge's Docker container) succeeded throughout the
- * identical time window. Since a genuine Jetty client failed the same way {@code curl} did, the cause
- * is not "ad-hoc tool vs. real client" as first suspected - the one remaining common factor across
- * every failing attempt is network origin: both the {@code curl} calls and the standalone Java test
- * ran from the developer's host machine, a different egress IP than the container. That fits an
- * IP/origin-bound access token. See
- * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full writeup. Practically:
- * a negative result against this API from a different network origin than the account bridge itself
- * does not reliably say anything about the endpoint - only a call from the same origin does.
+ * <b>Testing this API with anything other than this class is unreliable, for reasons not yet
+ * understood.</b> Every standalone call to {@code mqtt/userInfo} tried so far - {@code curl} from two
+ * different machines, a standalone Java process using the same Jetty {@code HttpClient} library this
+ * class uses, and a call made from inside the account bridge's own container - has been rejected with
+ * a business-level "invalid token" response, while this class's own calls succeed continuously. Client
+ * library, host, and even network egress IP have all been ruled out as the distinguishing factor; see
+ * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full investigation and what
+ * remains untested. Practically: a negative result against this API from anything other than this
+ * class does not reliably say anything about the endpoint.
  *
  * @author David Martin - Initial contribution
  */

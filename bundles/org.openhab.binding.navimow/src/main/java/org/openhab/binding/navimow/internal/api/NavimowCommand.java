@@ -24,19 +24,19 @@ import org.eclipse.jdt.annotation.Nullable;
  * dock; there is no confirmed REST equivalent for anything else, e.g. blade height).
  *
  * <p>
- * {@code START}, {@code PAUSE}, {@code RESUME} and {@code DOCK} are live-confirmed end-to-end
- * (2026-09-15, real Navimow X430): sent in sequence, each returned a real non-null {@code cmdNum}
- * and the mower's reported {@code vehicleState} transitioned correctly (isRunning &rarr; isPaused
- * &rarr; isRunning &rarr; isDocking &rarr; isDocked). {@code STOP} mirrors the official SDK's
- * mapping - the same {@code StartStop} execution as {@code START} with the params inverted - but
- * could not itself be live-confirmed: it was only reachable via a standalone call (since it wasn't
- * part of this enum yet at the time), made from the developer's own machine rather than from inside
- * the account bridge's Docker container. Every such standalone call - to this and to other endpoints -
- * was consistently rejected regardless of token freshness or client library, while the real binding's
- * calls (running inside the container) succeeded throughout the same window; the best-supported
- * explanation is a network-origin-bound access token, not anything about {@code STOP} itself - see
- * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full investigation. Either
- * way, this mapping is inferred-correct, not yet independently proven the way the other four are.
+ * All five commands are now live-confirmed end-to-end through this binding's own client (real
+ * Navimow X430): first {@code START}/{@code PAUSE}/{@code RESUME}/{@code DOCK} on 2026-09-15, then
+ * {@code STOP} the same day in a second run (sequence: START &rarr; PAUSE &rarr; RESUME &rarr;
+ * STOP &rarr; DOCK). Every one returned a real non-null {@code cmdNum} and produced a real
+ * {@code vehicleState} transition: isRunning &rarr; isPaused &rarr; isRunning &rarr; <b>isPaused
+ * &rarr;</b> isDocking &rarr; isDocked.
+ *
+ * <p>
+ * <b>{@code STOP} and {@code PAUSE} are indistinguishable from the reported state alone</b> - both
+ * settle to the exact same {@code vehicleState}, {@code isPaused}, despite using different Google
+ * Smart Home execution verbs ({@code StartStop}/{@code on:false} vs. {@code PauseUnpause}/
+ * {@code on:false}). Whatever distinction exists between them on the real hardware (if any - e.g. a
+ * different re-arm/timeout behavior) is not visible through this API's status endpoint.
  *
  * @author David Martin - Initial contribution
  */
