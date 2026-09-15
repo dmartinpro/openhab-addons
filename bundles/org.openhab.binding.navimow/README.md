@@ -1,95 +1,102 @@
 # Navimow Binding
 
-_Give some details about what this binding is meant for - a protocol, system, specific device._
+This is the binding for **Segway Navimow robotic lawn mowers**, integrating via Segway's cloud REST API
+(`https://navimow-fra.ninebot.com`) and, optionally, its MQTT push channel. There is no local/LAN protocol
+support - everything goes through the cloud, the same way the official Navimow app and Home Assistant
+integrations do.
 
-_If possible, provide some resources like pictures (only PNG is supported currently), a video, etc. to give an impression of what can be done with this binding._
-_You can place such resources into a `doc` folder next to this README.md._
-
-_Put each sentence in a separate line to improve readability of diffs._
+Authentication uses a browser-based OAuth2 flow, reusing the `client_id`/`client_secret` pair shared by
+every known third-party Navimow integration (reverse-engineered from two independent open-source Home
+Assistant integrations, not officially published by Segway).
 
 ## Supported Things
 
-_Please describe the different supported things / devices including their ThingTypeUID within this section._
-_Which different types are supported, which models were tested etc.?_
-_Note that it is planned to generate some part of this based on the XML files within ```src/main/resources/OH-INF/thing``` of your binding._
-
-- `bridge`: Short description of the Bridge, if any
-- `sample`: Short description of the Thing with the ThingTypeUID `sample`
+| Thing        | Type   | Description                                                                          |
+|--------------|--------|---------------------------------------------------------------------------------------|
+| `account`    | Bridge | A Segway Navimow cloud account. Owns authentication and the REST polling/MQTT loop.    |
+| `mower`      | Thing  | One robotic lawn mower linked to the account. Auto-discovered once the bridge is online. |
 
 ## Discovery
 
-_Describe the available auto-discovery features here._
-_Mention for what it works and what needs to be kept in mind when using it._
+Once the `account` bridge is online, every mower linked to the account is discovered automatically and
+added to the inbox. Discovery is driven entirely by the cloud API's device list - there is no local
+network scanning.
 
-## Binding Configuration
+## Bridge Configuration
 
-_If your binding requires or supports general configuration settings, please create a folder ```cfg``` and place the configuration file ```<bindingId>.cfg``` inside it._
-_In this section, you should link to this file and provide some information about the options._
-_The file could e.g. look like:_
+The `account` bridge has no username/password or client id/secret configuration parameters:
+authentication is done through a browser-based OAuth2 flow. Once the bridge Thing is created, check its
+status - it will report `OFFLINE`/`CONFIGURATION_ERROR` with a link to open in a browser to sign in to
+your Navimow account. Once signed in, the bridge goes `ONLINE` automatically.
 
-```
-# Configuration for the Navimow Binding
-#
-# Default secret key for the pairing of the Navimow Thing.
-# It has to be between 10-40 (alphanumeric) characters.
-# This may be changed by the user for security reasons.
-secret=openHABSecret
-```
-
-_Note that it is planned to generate some part of this based on the information that is available within ```src/main/resources/OH-INF/binding``` of your binding._
-
-_If your binding does not offer any generic configurations, you can remove this section completely._
+| Name             | Type    | Description                                                                                                    | Default | Required | Advanced |
+|------------------|---------|------------------------------------------------------------------------------------------------------------------|---------|----------|----------|
+| `pollingInterval`| integer | How often, in seconds, to poll the cloud API for mower status.                                                  | 60      | no       | yes      |
+| `enableMqtt`     | boolean | Opens an additional MQTT connection to the cloud so `activity`/`battery-level` updates arrive within milliseconds of a real state change, instead of waiting for the next REST poll. REST polling keeps running unaffected either way and remains the bridge's only source of truth for online/offline status. | false   | no       | yes      |
 
 ## Thing Configuration
 
-_Describe what is needed to manually configure a thing, either through the UI or via a thing-file._
-_This should be mainly about its mandatory and optional configuration parameters._
+### `mower` Thing Configuration
 
-_Note that it is planned to generate some part of this based on the XML files within ```src/main/resources/OH-INF/thing``` of your binding._
-
-### `sample` Thing Configuration
-
-| Name            | Type    | Description                           | Default | Required | Advanced |
-|-----------------|---------|---------------------------------------|---------|----------|----------|
-| hostname        | text    | Hostname or IP address of the device  | N/A     | yes      | no       |
-| password        | text    | Password to access the device         | N/A     | yes      | no       |
-| refreshInterval | integer | Interval the device is polled in sec. | 600     | no       | yes      |
+| Name | Type | Description                                                                             | Default | Required | Advanced |
+|------|------|------------------------------------------------------------------------------------------|---------|----------|----------|
+| `id` | text | The device id as reported by the cloud API. Normally filled in automatically by discovery. | N/A     | yes      | no       |
 
 ## Channels
 
-_Here you should provide information about available channel types, what their meaning is and how they can be used._
+| Channel         | Type              | Read/Write | Description                                                                                   |
+|-----------------|-------------------|------------|-------------------------------------------------------------------------------------------------|
+| `activity`      | String            | R          | The mower's current canonical activity: `idle`, `mowing`, `paused`, `docked`, `charging`, `returning`, `error`, `unknown`. |
+| `control`       | String            | W          | Sends a command to the mower: `START`, `STOP`, `PAUSE`, `RESUME`, `DOCK`.                       |
+| `battery-level` | Number (`system.battery-level`) | R | Battery level as a percentage (0-100%).                                                    |
 
-_Note that it is planned to generate some part of this based on the XML files within ```src/main/resources/OH-INF/thing``` of your binding._
+### Thing Properties
 
-| Channel | Type   | Read/Write | Description                 |
-|---------|--------|------------|-----------------------------|
-| control | Switch | RW         | This is the control channel |
+In addition to the channels above, the `mower` Thing reports the following properties, refreshed every
+poll cycle:
+
+| Property           | Description                                                                 |
+|--------------------|-------------------------------------------------------------------------------|
+| `modelId`          | The mower's model, e.g. `X430`.                                              |
+| `firmwareVersion`  | The mower's firmware version string.                                        |
+| `batteryTier`      | A human-readable battery tier reported by the cloud API, e.g. `HIGH`.       |
 
 ## Full Example
-
-_Provide a full usage example based on textual configuration files._
-_*.things, *.items examples are mandatory as textual configuration is well used by many users._
-_*.sitemap examples are optional._
 
 ### Thing Configuration
 
 ```java
-Example thing configuration goes here.
+Bridge navimow:account:myaccount [ pollingInterval=60, enableMqtt=false ] {
+    Thing mower mymower [ id="22AAD2602Y0911" ]
+}
 ```
 
 ### Item Configuration
 
 ```java
-Example item configuration goes here.
+String    Navimow_Activity  "Activity"       { channel="navimow:mower:myaccount:mymower:activity" }
+String    Navimow_Control   "Control"        { channel="navimow:mower:myaccount:mymower:control" }
+Number    Navimow_Battery   "Battery [%d %%]" { channel="navimow:mower:myaccount:mymower:battery-level" }
 ```
 
-### Sitemap Configuration
+## Known Limitations
 
-```perl
-Optional Sitemap configuration goes here.
-Remove this section, if not needed.
-```
+- **Cloud-only**: requires internet connectivity; no local/LAN fallback.
+- **Polling-based updates by default** (60s interval). The optional `enableMqtt` push connection lowers
+  the latency of `activity`/`battery-level` updates to milliseconds, but does not add any data REST
+  polling doesn't already have - notably, **mower position is not available at all**: the MQTT push
+  channel was investigated specifically for this and does not carry it (see below).
+- `STOP` and `PAUSE` are indistinguishable from the reported state alone - both settle to the same
+  `isPaused` state, despite using different underlying command verbs.
+- The MQTT connection can only be opened from inside the account bridge's own process - the cloud API
+  binds an access token to whichever process first used it, and rejects the same token used anywhere
+  else (even a faithful re-implementation of the official client's request shape). This is a Segway
+  backend behavior, not a limitation of this binding, but it does mean the MQTT connection cannot be
+  independently diagnosed with an external tool - only through the bridge's own logs.
 
-## Any custom content here!
+## Feedback
 
-_Feel free to add additional sections for whatever you think should also be mentioned about your binding!_
+This binding is **not yet submitted to the official openHAB add-ons repository**. It has been built,
+live-tested, and iterated against a real production Navimow X430 throughout development (every command,
+the full REST status surface, and the MQTT push channel), but it hasn't had independent third-party
+review or broad real-world testing across other Navimow models yet - issues and feedback are welcome.
