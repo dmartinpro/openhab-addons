@@ -95,41 +95,48 @@ public class NavimowBindingConstants {
     public static final int DEFAULT_POLLING_INTERVAL_S = 60;
 
     /**
-     * Business-level "code" value the cloud API uses to report an invalid/expired access token - or
-     * possibly something else; the true cause is still unknown despite three rounds of live testing.
+     * Business-level "code" value the cloud API uses to report a token/session it won't honor.
      * Response shape: HTTP 200 with body {@code {"code":4005,"desc":"CODE_OAUTH_INFO_ILLEGAL"}}, not
      * an HTTP 401/403.
      *
      * <p>
-     * <b>Ruled out, in order, each disproven by the next test:</b>
+     * <b>Conclusive as of 2026-09-15: this is not about MQTT, and never was.</b> Four theories were
+     * tried and eliminated in sequence before the real pattern became visible:
      * <ol>
-     * <li>2026-09-14 - "token had genuinely expired." True in the one case that found this, but
-     * doesn't explain what came next.
-     * <li>2026-09-15 - "ad-hoc tool ({@code curl}) vs. this binding's real client." A {@code STOP}
-     * command and every status poll sent as standalone {@code curl} calls with fresh, valid tokens
-     * were all rejected while the binding's own calls succeeded in the same window - but then a
-     * standalone Java test using the same Jetty {@code HttpClient} library the binding itself uses
-     * failed identically, ruling out "curl specifically."
-     * <li>2026-09-15 - "network origin (IP) differs from the account bridge's container." Disproven by
-     * directly comparing egress IPs: the container and the host machine share the exact same public
-     * IP (both sit behind the same NAT), and a call made from inside the container itself (same
-     * network namespace the binding's successful calls run in) still failed identically.
+     * <li>"Token had genuinely expired" - true the one time it was first found, but didn't explain
+     * what came next.
+     * <li>"Ad-hoc tool ({@code curl}) vs. this binding's real client" - disproven by a standalone Java
+     * test using the same Jetty {@code HttpClient} library the binding itself uses, which failed
+     * identically.
+     * <li>"Network origin (IP) differs from the account bridge's container" - disproven by directly
+     * comparing egress IPs (identical - both sit behind the same NAT) and by calling from inside the
+     * container itself, which still failed.
+     * <li>"Something {@code mqtt/userInfo}-specific" - disproven by
+     * {@code NavimowHaPluginMimicLiveTest}, which reproduced the official {@code segwaynavimow/
+     * NavimowHA} plugin's exact request mechanics (its precise header set, and its connection-reuse
+     * pattern of calling {@code authList} then {@code mqtt/userInfo} on one persistent client) and got
+     * {@code CODE_OAUTH_INFO_ILLEGAL} on <i>both</i> calls - including {@code authList}, an endpoint
+     * the real account bridge calls successfully every single poll cycle with what should be the same
+     * token value.
      * </ol>
      *
      * <p>
-     * <b>Still standing, untested:</b> TLS/HTTP fingerprinting (JA3-style signature, ALPN/HTTP2
-     * negotiation) differing between openHAB's shared {@code HttpClient} and any ad-hoc client; or
-     * some form of session/connection continuity tied to the original OAuth login rather than the
-     * bearer token alone. Not pursued further - each additional round means more probing of a
-     * production third-party service for a question this binding (REST-only, no MQTT) doesn't
-     * actually depend on the answer to.
+     * <b>The pattern that survives all four rounds:</b> every failing attempt was a different process
+     * than the one currently using the token; every succeeding call was the account bridge itself.
+     * Not the IP, not the client library, not the endpoint - just "is this the process the token was
+     * issued to." That fits an access token bound to whichever client/session first started using it
+     * (here, the account bridge): a second process replaying the same bearer value looks, to Segway's
+     * backend, indistinguishable from a stolen token being replayed elsewhere - which is exactly the
+     * scenario a security-conscious backend would want to block, benign intent notwithstanding.
      *
      * <p>
-     * <b>Still not reconfirmed against this binding's own {@code authList}/{@code getVehicleStatus}/
-     * {@code sendCommands} calls</b> - only ever seen via ad-hoc calls to {@code mqtt/userInfo} and,
-     * once, a standalone {@code sendCommands}/{@code getVehicleStatus} call. Worth checking the logs
-     * later: if {@code NavimowAuthenticationException} is only ever thrown by real HTTP 401/403 for
-     * this binding's own traffic, this business-code check may be doing nothing in practice.
+     * <b>Practical consequence:</b> no external tool, however faithful to the real client's request
+     * shape, can validate this API's behavior against a token copied out of a running bridge - only
+     * code running inside that same bridge process can. This is why {@link NavimowApiClient}'s own
+     * {@code authList}/{@code getVehicleStatus}/{@code sendCommands} calls have never independently
+     * triggered this code (they always run as the bridge itself) while every deliberate external probe
+     * has hit it on every endpoint tried. Not itself proof the check in {@code requireSuccess} is
+     * correctly scoped - just proof that testing it externally can no longer tell us more.
      */
     public static final int BUSINESS_CODE_OAUTH_INFO_ILLEGAL = 4005;
 

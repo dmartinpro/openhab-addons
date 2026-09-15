@@ -68,15 +68,16 @@ import com.google.gson.reflect.TypeToken;
  * {@code OAuthClientService}).
  *
  * <p>
- * <b>Testing this API with anything other than this class is unreliable, for reasons not yet
- * understood.</b> Every standalone call to {@code mqtt/userInfo} tried so far - {@code curl} from two
- * different machines, a standalone Java process using the same Jetty {@code HttpClient} library this
- * class uses, and a call made from inside the account bridge's own container - has been rejected with
- * a business-level "invalid token" response, while this class's own calls succeed continuously. Client
- * library, host, and even network egress IP have all been ruled out as the distinguishing factor; see
- * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full investigation and what
- * remains untested. Practically: a negative result against this API from anything other than this
- * class does not reliably say anything about the endpoint.
+ * <b>A token this class obtained cannot be reused from anywhere else.</b> Every standalone call
+ * tried against this API using a token copied out of a running bridge - to {@code mqtt/userInfo}, and
+ * even to {@code authList}, an endpoint this class calls successfully every poll cycle - has been
+ * rejected with a business-level "invalid token" response, regardless of client library, host, or
+ * network egress IP. The evidence points to the token being bound to whichever process first started
+ * using it (this class, inside the account bridge): a second process replaying the same bearer value
+ * looks, to Segway's backend, like a stolen token being replayed. See
+ * {@code NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL} for the full investigation.
+ * Practically: this API can only be validated through code running inside the same process as the
+ * account bridge - never through a token copied out to an external tool.
  *
  * @author David Martin - Initial contribution
  */
