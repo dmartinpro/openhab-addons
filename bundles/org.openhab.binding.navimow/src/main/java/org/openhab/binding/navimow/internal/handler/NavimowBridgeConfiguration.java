@@ -32,6 +32,16 @@ public class NavimowBridgeConfiguration {
     private @Nullable Integer pollingInterval;
 
     /**
+     * Enables the optional MQTT push connection, which delivers {@code activity}/{@code battery-level}
+     * updates within milliseconds of a real state change instead of waiting for the next REST poll -
+     * see {@code org.openhab.binding.navimow.internal.mqtt.dto.MqttVehicleState} for what is actually
+     * on this topic (notably not mower position, despite that being the feature's original goal).
+     * Defaults to {@code false}. Entirely additive: REST polling remains the bridge's only source of
+     * truth for {@code ThingStatus} either way.
+     */
+    private boolean enableMqtt;
+
+    /**
      * @return the configured REST polling interval in seconds, or {@code null} if left at the
      *         thing-type default
      */
@@ -41,5 +51,16 @@ public class NavimowBridgeConfiguration {
 
     public void setPollingInterval(Integer pollingInterval) {
         this.pollingInterval = pollingInterval;
+    }
+
+    /**
+     * @return whether the experimental MQTT push connection is enabled
+     */
+    public boolean isEnableMqtt() {
+        return enableMqtt;
+    }
+
+    public void setEnableMqtt(boolean enableMqtt) {
+        this.enableMqtt = enableMqtt;
     }
 }

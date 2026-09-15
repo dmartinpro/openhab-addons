@@ -19,6 +19,19 @@
 				<default>60</default>
 				<advanced>true</advanced>
 			</parameter>
+			<parameter name="enableMqtt" type="boolean">
+				<label>Enable MQTT Push Updates</label>
+				<description>
+					Opens an additional MQTT connection to the cloud so activity and battery-level
+					updates arrive within
+					milliseconds of a real state change, instead of waiting for
+					the next REST poll. REST polling keeps running
+					unaffected either way and remains
+					the bridge's only source of truth for online/offline status.
+				</description>
+				<default>false</default>
+				<advanced>true</advanced>
+			</parameter>
 		</config-description>
 	</bridge-type>
 

@@ -23,6 +23,7 @@ import org.openhab.binding.navimow.internal.api.dto.NavimowActivity;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowCommunicationException;
+import org.openhab.binding.navimow.internal.mqtt.dto.MqttVehicleState;
 import org.openhab.core.library.types.DecimalType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.Bridge;
@@ -150,6 +151,30 @@ public class NavimowMowerHandler extends BaseThingHandler {
         Integer batteryPercentage = status.getBatteryPercentage();
         updateState(CHANNEL_BATTERY_LEVEL,
                 batteryPercentage != null ? new DecimalType(batteryPercentage) : UnDefType.UNDEF);
+    }
+
+    /**
+     * Applies one MQTT push message to this mower's channels. Called by {@link NavimowAccountHandler}
+     * from {@link org.openhab.binding.navimow.internal.mqtt.NavimowMqttListener#onVehicleState} - may
+     * be called concurrently with {@link #updateFromStatus(NavimowDeviceStatus)} from a different
+     * thread. Both update the same two channels with last-write-wins semantics; this is intentional -
+     * MQTT's whole value here is pushing the same {@code activity}/{@code battery-level} data REST
+     * polling already provides, just with much lower latency (see {@link MqttVehicleState}'s Javadoc
+     * for why position, the feature's original goal, turned out not to be part of this payload).
+     *
+     * @param state the parsed MQTT state message
+     */
+    public void updateFromMqttState(MqttVehicleState state) {
+        String rawState = state.vehicleState;
+        if (rawState != null) {
+            NavimowActivity activity = NavimowActivity.fromRawState(rawState);
+            updateState(CHANNEL_ACTIVITY, new StringType(activity.name().toLowerCase()));
+        }
+
+        Integer battery = state.battery;
+        if (battery != null) {
+            updateState(CHANNEL_BATTERY_LEVEL, new DecimalType(battery));
+        }
     }
 
     private @Nullable NavimowAccountHandler getAccountHandler() {

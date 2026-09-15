@@ -33,11 +33,15 @@ import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.navimow.internal.api.NavimowApiClient;
 import org.openhab.binding.navimow.internal.api.NavimowAuthorizationProvider;
 import org.openhab.binding.navimow.internal.api.NavimowCommand;
+import org.openhab.binding.navimow.internal.api.dto.MqttUserInfo;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDevice;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowCommunicationException;
 import org.openhab.binding.navimow.internal.discovery.NavimowDiscoveryService;
+import org.openhab.binding.navimow.internal.mqtt.NavimowMqttConnection;
+import org.openhab.binding.navimow.internal.mqtt.NavimowMqttListener;
+import org.openhab.binding.navimow.internal.mqtt.dto.MqttVehicleState;
 import org.openhab.binding.navimow.internal.servlet.NavimowConnectServlet;
 import org.openhab.core.auth.client.oauth2.AccessTokenResponse;
 import org.openhab.core.auth.client.oauth2.OAuthClientService;
@@ -62,14 +66,23 @@ import org.slf4j.LoggerFactory;
  * {@link NavimowMowerHandler}.
  *
  * <p>
- * This binding is REST-only (no MQTT/WebSocket): every mower's state is refreshed by polling
- * {@code getVehicleStatus} on a configurable interval, the same fallback path Home Assistant's own
- * Navimow integrations use when their MQTT push connection goes stale.
+ * REST polling (via {@code getVehicleStatus}) remains the bridge's only source of truth for
+ * {@code ThingStatus} and every channel. MQTT support (see {@link NavimowMqttConnection}) is optional
+ * (config parameter {@code enableMqtt}, default off) and purely additive: it pushes the same
+ * {@code activity}/{@code battery-level} data REST polling already provides, just within milliseconds
+ * of a real change instead of waiting for the next poll - see {@link NavimowMqttConnection}'s Javadoc
+ * for why that turned out to be its actual value (mower position, the original goal, is not part of
+ * this data at all). If MQTT fails to connect, the bridge stays fully functional on REST alone.
+ *
+ * <p>
+ * The MQTT connection is opened from inside this handler, never handed off to a separate component -
+ * see {@link NavimowMqttConnection}'s Javadoc for why that is not just a design preference.
  *
  * @author David Martin - Initial contribution
  */
 @NonNullByDefault
-public class NavimowAccountHandler extends BaseBridgeHandler implements NavimowAuthorizationProvider {
+public class NavimowAccountHandler extends BaseBridgeHandler
+        implements NavimowAuthorizationProvider, NavimowMqttListener {
 
     private static final int RECONNECT_DELAY_S = 60;
     private static final int MIN_POLLING_INTERVAL_S = 10;
@@ -79,6 +92,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler implements NavimowA
     private final HttpService httpService;
     private final OAuthFactory oAuthFactory;
     private final Map<String, NavimowMowerHandler> mowerHandlers = new ConcurrentHashMap<>();
+    private final NavimowMqttConnection mqttConnection = new NavimowMqttConnection(this);
 
     private volatile @Nullable OAuthClientService oAuthClientService;
     private volatile @Nullable NavimowApiClient apiClient;
@@ -132,6 +146,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler implements NavimowA
         freeConnectServlet();
         freeReconnectJob();
         startPolling();
+        startMqttIfEnabled();
         updateStatus(ThingStatus.ONLINE);
     }
 
@@ -231,6 +246,45 @@ public class NavimowAccountHandler extends BaseBridgeHandler implements NavimowA
         pollingJob = null;
     }
 
+    /**
+     * Opens the optional MQTT push connection if {@code enableMqtt} is set, off the calling thread so
+     * a slow or failing MQTT handshake never delays the bridge going {@code ONLINE} on REST alone.
+     *
+     * <p>
+     * Fetches a fresh device list and {@code mqtt/userInfo} each time, so this doubles as the
+     * reconnect path after an OAuth token refresh - see {@link NavimowMqttConnection#connect} for why
+     * that matters (the MQTT credentials may need to change together with the token).
+     */
+    private void startMqttIfEnabled() {
+        NavimowBridgeConfiguration config = getConfigAs(NavimowBridgeConfiguration.class);
+        if (!config.isEnableMqtt()) {
+            return;
+        }
+        NavimowApiClient client = apiClient;
+        if (client == null) {
+            return;
+        }
+        scheduler.execute(() -> {
+            try {
+                List<NavimowDevice> devices = client.getDevices();
+                List<String> ids = devices.stream().map(d -> d.id).filter(Objects::nonNull).toList();
+                MqttUserInfo mqttUserInfo = client.getMqttUserInfo();
+                mqttConnection.connect(mqttUserInfo, getAccessToken(), ids);
+            } catch (NavimowAuthenticationException | NavimowCommunicationException e) {
+                logger.debug("Could not establish MQTT connection, continuing with REST polling only: {}",
+                        e.getMessage());
+            }
+        });
+    }
+
+    @Override
+    public void onVehicleState(String deviceId, MqttVehicleState state) {
+        NavimowMowerHandler handler = mowerHandlers.get(deviceId);
+        if (handler != null) {
+            handler.updateFromMqttState(state);
+        }
+    }
+
     private synchronized void poll() {
         NavimowApiClient client = apiClient;
         if (client == null) {
@@ -311,6 +365,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler implements NavimowA
     @Override
     public void dispose() {
         stopPolling();
+        mqttConnection.disconnect();
         freeReconnectJob();
         freeConnectServlet();
 
