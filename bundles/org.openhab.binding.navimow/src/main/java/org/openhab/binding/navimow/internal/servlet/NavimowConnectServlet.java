@@ -16,17 +16,17 @@ import static org.openhab.binding.navimow.internal.NavimowBindingConstants.OAUTH
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.OAUTH_CLIENT_ID;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Map.Entry;
+import java.util.stream.Collectors;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
-import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.navimow.internal.handler.NavimowAccountHandler;
 import org.osgi.service.http.HttpService;
 import org.slf4j.Logger;
@@ -96,20 +96,14 @@ public class NavimowConnectServlet extends NavimowServlet {
         params.put("response_type", "code");
         params.put("redirect_uri", redirectUri);
 
-        StringBuilder url = new StringBuilder(OAUTH_AUTHORIZE_URL).append('?');
-        boolean first = true;
-        for (Entry<String, String> entry : params.entrySet()) {
-            if (!first) {
-                url.append('&');
-            }
-            first = false;
-            url.append(urlEncode(entry.getKey())).append('=').append(urlEncode(entry.getValue()));
-        }
-        return url.toString();
+        String query = params.entrySet().stream()
+                .map(entry -> urlEncode(entry.getKey()) + "=" + urlEncode(entry.getValue()))
+                .collect(Collectors.joining("&"));
+        return OAUTH_AUTHORIZE_URL + "?" + query;
     }
 
-    private String urlEncode(@Nullable String value) {
-        return java.net.URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private String renderPage(String title, String bodyHtml) {

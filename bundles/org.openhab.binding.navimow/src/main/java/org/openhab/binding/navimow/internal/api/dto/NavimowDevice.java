@@ -38,8 +38,12 @@ public class NavimowDevice {
 
     public @Nullable String name;
 
+    /** Surfaced on the mower Thing as {@code Thing.PROPERTY_MODEL_ID}. */
     public @Nullable String model;
 
-    /** Firmware version string, e.g. {@code "005D"} - not confirmed to be human-readable/semver. */
+    /**
+     * Firmware version string, e.g. {@code "005D"} - not confirmed to be human-readable/semver.
+     * Surfaced on the mower Thing as {@code Thing.PROPERTY_FIRMWARE_VERSION}.
+     */
     public @Nullable String firmware;
 }

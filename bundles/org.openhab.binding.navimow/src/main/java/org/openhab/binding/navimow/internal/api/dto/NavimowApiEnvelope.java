@@ -18,23 +18,14 @@ import org.eclipse.jdt.annotation.Nullable;
  * {@link NavimowApiEnvelope} is the common response wrapper used by every Navimow "smarthome" REST
  * endpoint observed so far ({@code authList}, {@code getVehicleStatus}, {@code sendCommands}):
  * {@code {"code":1,"desc":"...","data":{"payload": ...}}}. {@code code == 1} indicates success;
- * any other value indicates a business-level failure described by {@link #desc}.
+ * any other value indicates a business-level failure described by {@link #desc}. See
+ * {@link NavimowApiResponseBase} for the {@code code}/{@code desc}/{@code isSuccess()} part shared
+ * with {@link MqttUserInfoResponse}.
  *
  * @param <T> the endpoint-specific shape of {@code data.payload}
  * @author David Martin - Initial contribution
  */
-public class NavimowApiEnvelope<T> {
-
-    public int code;
-
-    public @Nullable String desc;
+public class NavimowApiEnvelope<T> extends NavimowApiResponseBase {
 
     public @Nullable NavimowApiData<T> data;
-
-    /**
-     * @return whether the response indicates success (business code 1), not just an HTTP 2xx
-     */
-    public boolean isSuccess() {
-        return code == 1;
-    }
 }

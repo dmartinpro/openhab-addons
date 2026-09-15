@@ -43,6 +43,7 @@ import org.openhab.binding.navimow.internal.api.dto.GetVehicleStatusRequest;
 import org.openhab.binding.navimow.internal.api.dto.MqttUserInfo;
 import org.openhab.binding.navimow.internal.api.dto.MqttUserInfoResponse;
 import org.openhab.binding.navimow.internal.api.dto.NavimowApiEnvelope;
+import org.openhab.binding.navimow.internal.api.dto.NavimowApiResponseBase;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDevice;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
 import org.openhab.binding.navimow.internal.api.dto.SendCommandsPayload;
@@ -241,16 +242,7 @@ public class NavimowApiClient {
     public MqttUserInfo getMqttUserInfo() throws NavimowAuthenticationException, NavimowCommunicationException {
         Request request = httpClient.newRequest(mqttUserInfoUrl).method(HttpMethod.GET);
         MqttUserInfoResponse response = send(request, mqttUserInfoUrl, MqttUserInfoResponse.class);
-
-        if (!response.isSuccess()) {
-            if (response.code == NavimowBindingConstants.BUSINESS_CODE_OAUTH_INFO_ILLEGAL
-                    || NavimowBindingConstants.BUSINESS_DESC_OAUTH_INFO_ILLEGAL.equals(response.desc)) {
-                throw new NavimowAuthenticationException(
-                        "mqtt/userInfo rejected the access token (code " + response.code + ": " + response.desc + ")");
-            }
-            throw new NavimowCommunicationException(
-                    "mqtt/userInfo failed with code " + response.code + ": " + response.desc);
-        }
+        requireSuccess(response, "mqtt/userInfo");
 
         MqttUserInfo data = response.data;
         if (data == null) {
@@ -259,7 +251,7 @@ public class NavimowApiClient {
         return data;
     }
 
-    private void requireSuccess(NavimowApiEnvelope<?> response, String endpoint)
+    private void requireSuccess(NavimowApiResponseBase response, String endpoint)
             throws NavimowAuthenticationException, NavimowCommunicationException {
         if (response.isSuccess()) {
             return;

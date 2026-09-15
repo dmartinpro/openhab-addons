@@ -46,7 +46,11 @@ public class NavimowDeviceStatus {
 
     public @Nullable List<CapacityRemainingItem> capacityRemaining;
 
-    /** Human-readable battery tier, e.g. {@code "HIGH"}. See the class Javadoc for confirmation status. */
+    /**
+     * Human-readable battery tier, e.g. {@code "HIGH"}. See the class Javadoc for confirmation status.
+     * Surfaced on the mower Thing as the {@code batteryTier} property (see
+     * {@code NavimowBindingConstants.PROPERTY_BATTERY_TIER}).
+     */
     public @Nullable String descriptiveCapacityRemaining;
 
     /**

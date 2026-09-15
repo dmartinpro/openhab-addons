@@ -145,8 +145,9 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
         freeConnectServlet();
         freeReconnectJob();
-        startPolling();
-        startMqttIfEnabled();
+        NavimowBridgeConfiguration config = getConfigAs(NavimowBridgeConfiguration.class);
+        startPolling(config);
+        startMqttIfEnabled(config);
         updateStatus(ThingStatus.ONLINE);
     }
 
@@ -230,9 +231,8 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
     }
 
-    private void startPolling() {
+    private void startPolling(NavimowBridgeConfiguration config) {
         if (pollingJob == null) {
-            NavimowBridgeConfiguration config = getConfigAs(NavimowBridgeConfiguration.class);
             int interval = Objects.requireNonNullElse(config.getPollingInterval(), DEFAULT_POLLING_INTERVAL_S);
             pollingJob = scheduler.scheduleWithFixedDelay(this::poll, 0, interval, TimeUnit.SECONDS);
         }
@@ -255,8 +255,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler
      * reconnect path after an OAuth token refresh - see {@link NavimowMqttConnection#connect} for why
      * that matters (the MQTT credentials may need to change together with the token).
      */
-    private void startMqttIfEnabled() {
-        NavimowBridgeConfiguration config = getConfigAs(NavimowBridgeConfiguration.class);
+    private void startMqttIfEnabled(NavimowBridgeConfiguration config) {
         if (!config.isEnableMqtt()) {
             return;
         }
@@ -266,8 +265,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
         scheduler.execute(() -> {
             try {
-                List<NavimowDevice> devices = client.getDevices();
-                List<String> ids = devices.stream().map(d -> d.id).filter(Objects::nonNull).toList();
+                List<String> ids = deviceIds(client.getDevices());
                 MqttUserInfo mqttUserInfo = client.getMqttUserInfo();
                 mqttConnection.connect(mqttUserInfo, getAccessToken(), ids);
             } catch (NavimowAuthenticationException | NavimowCommunicationException e) {
@@ -285,6 +283,14 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
     }
 
+    /**
+     * @param devices a device list as returned by {@link NavimowApiClient#getDevices()}
+     * @return each device's id, dropping any entry the API returned without one
+     */
+    private static List<String> deviceIds(List<NavimowDevice> devices) {
+        return devices.stream().map(d -> d.id).filter(Objects::nonNull).toList();
+    }
+
     private synchronized void poll() {
         NavimowApiClient client = apiClient;
         if (client == null) {
@@ -292,8 +298,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
         try {
             List<NavimowDevice> devices = client.getDevices();
-            List<String> ids = devices.stream().map(d -> d.id).filter(Objects::nonNull).toList();
-            Map<String, NavimowDeviceStatus> statuses = client.getDeviceStatuses(ids);
+            Map<String, NavimowDeviceStatus> statuses = client.getDeviceStatuses(deviceIds(devices));
 
             updateStatus(ThingStatus.ONLINE);
             for (NavimowDevice device : devices) {
@@ -303,6 +308,7 @@ public class NavimowAccountHandler extends BaseBridgeHandler
                 }
                 NavimowMowerHandler handler = mowerHandlers.get(id);
                 if (handler != null) {
+                    handler.updateFromDevice(device);
                     handler.updateFromStatus(statuses.get(id));
                 } else {
                     logger.debug("No handler registered yet for mower '{}'", id);

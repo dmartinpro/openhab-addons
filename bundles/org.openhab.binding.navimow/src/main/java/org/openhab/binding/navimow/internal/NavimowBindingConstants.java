@@ -48,8 +48,13 @@ public class NavimowBindingConstants {
     public static final String CHANNEL_CONTROL = "control";
     public static final String CHANNEL_BATTERY_LEVEL = "battery-level";
 
-    // Device properties
-    public static final String PROPERTY_MODEL = "model";
+    /**
+     * Human-readable battery tier from {@code getVehicleStatus} (e.g. {@code "HIGH"}), surfaced as a
+     * Thing property since it isn't precise enough to warrant its own channel alongside
+     * {@link #CHANNEL_BATTERY_LEVEL}. Model and firmware use core's own {@code Thing.PROPERTY_MODEL_ID}/
+     * {@code PROPERTY_FIRMWARE_VERSION} instead of a binding-specific constant.
+     */
+    public static final String PROPERTY_BATTERY_TIER = "batteryTier";
 
     /**
      * OAuth2 client id shared by every known third-party Navimow integration (identifies the client

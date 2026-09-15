@@ -20,22 +20,12 @@ import org.eclipse.jdt.annotation.Nullable;
  * than nesting a further {@code payload} object underneath - confirmed from the official
  * {@code navimow-sdk} Python package's {@code async_get_mqtt_user_info}, which returns
  * {@code response.get("data", {})} with no further unwrapping. This is why this endpoint gets its
- * own dedicated envelope instead of reusing {@link NavimowApiEnvelope}.
+ * own dedicated envelope instead of reusing {@link NavimowApiEnvelope} - though both share the same
+ * {@code code}/{@code desc}/{@code isSuccess()} part via {@link NavimowApiResponseBase}.
  *
  * @author David Martin - Initial contribution
  */
-public class MqttUserInfoResponse {
-
-    public int code;
-
-    public @Nullable String desc;
+public class MqttUserInfoResponse extends NavimowApiResponseBase {
 
     public @Nullable MqttUserInfo data;
-
-    /**
-     * @return whether the response indicates success (business code 1), not just an HTTP 2xx
-     */
-    public boolean isSuccess() {
-        return code == 1;
-    }
 }

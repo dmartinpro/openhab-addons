@@ -15,11 +15,13 @@ package org.openhab.binding.navimow.internal.handler;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_ACTIVITY;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_BATTERY_LEVEL;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_CONTROL;
+import static org.openhab.binding.navimow.internal.NavimowBindingConstants.PROPERTY_BATTERY_TIER;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.navimow.internal.api.NavimowCommand;
 import org.openhab.binding.navimow.internal.api.dto.NavimowActivity;
+import org.openhab.binding.navimow.internal.api.dto.NavimowDevice;
 import org.openhab.binding.navimow.internal.api.dto.NavimowDeviceStatus;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowAuthenticationException;
 import org.openhab.binding.navimow.internal.api.exceptions.NavimowCommunicationException;
@@ -42,8 +44,9 @@ import org.slf4j.LoggerFactory;
 /**
  * The {@link NavimowMowerHandler} is the Thing handler for a single Navimow mower. It has no direct
  * network access of its own - it registers itself with the owning {@link NavimowAccountHandler},
- * which pushes status updates to it once per poll cycle via {@link #updateFromStatus(NavimowDeviceStatus)},
- * and forwards {@code control} channel commands back to the bridge to be sent over REST.
+ * which pushes status updates to it once per poll cycle via {@link #updateFromStatus(NavimowDeviceStatus)}
+ * and {@link #updateFromDevice(NavimowDevice)}, and forwards {@code control} channel commands back to
+ * the bridge to be sent over REST.
  *
  * @author David Martin - Initial contribution
  */
@@ -145,12 +148,35 @@ public class NavimowMowerHandler extends BaseThingHandler {
 
         updateStatus(ThingStatus.ONLINE);
 
-        NavimowActivity activity = NavimowActivity.fromRawState(status.vehicleState);
-        updateState(CHANNEL_ACTIVITY, new StringType(activity.name().toLowerCase()));
+        updateActivity(status.vehicleState);
 
         Integer batteryPercentage = status.getBatteryPercentage();
         updateState(CHANNEL_BATTERY_LEVEL,
                 batteryPercentage != null ? new DecimalType(batteryPercentage) : UnDefType.UNDEF);
+
+        String batteryTier = status.descriptiveCapacityRemaining;
+        if (batteryTier != null) {
+            updateProperty(PROPERTY_BATTERY_TIER, batteryTier);
+        }
+    }
+
+    /**
+     * Refreshes this mower's static device-metadata Thing properties. Called by
+     * {@link NavimowAccountHandler} once per poll cycle, from the same {@code authList} response it
+     * already fetches to resolve device ids - self-correcting rather than a one-time discovery-time
+     * snapshot, so a firmware update is reflected without needing to re-discover the Thing.
+     *
+     * @param device this mower's entry from the latest {@code authList} response
+     */
+    public void updateFromDevice(NavimowDevice device) {
+        String model = device.model;
+        if (model != null) {
+            updateProperty(Thing.PROPERTY_MODEL_ID, model);
+        }
+        String firmware = device.firmware;
+        if (firmware != null) {
+            updateProperty(Thing.PROPERTY_FIRMWARE_VERSION, firmware);
+        }
     }
 
     /**
@@ -167,14 +193,27 @@ public class NavimowMowerHandler extends BaseThingHandler {
     public void updateFromMqttState(MqttVehicleState state) {
         String rawState = state.vehicleState;
         if (rawState != null) {
-            NavimowActivity activity = NavimowActivity.fromRawState(rawState);
-            updateState(CHANNEL_ACTIVITY, new StringType(activity.name().toLowerCase()));
+            updateActivity(rawState);
         }
 
         Integer battery = state.battery;
         if (battery != null) {
             updateState(CHANNEL_BATTERY_LEVEL, new DecimalType(battery));
         }
+    }
+
+    /**
+     * Converts a raw {@code vehicleState} string into the canonical {@code activity} channel value.
+     * Shared by {@link #updateFromStatus} (which always calls this, even for a {@code null} raw
+     * state - {@link NavimowActivity#fromRawState} maps that to {@code UNKNOWN}) and
+     * {@link #updateFromMqttState} (which only calls this when a raw state is actually present,
+     * leaving the channel untouched otherwise rather than resetting it to {@code UNKNOWN}).
+     *
+     * @param rawState the raw state string, or {@code null}
+     */
+    private void updateActivity(@Nullable String rawState) {
+        NavimowActivity activity = NavimowActivity.fromRawState(rawState);
+        updateState(CHANNEL_ACTIVITY, new StringType(activity.name().toLowerCase()));
     }
 
     private @Nullable NavimowAccountHandler getAccountHandler() {
