@@ -222,15 +222,60 @@ public class DiagralHttpClientTest {
     }
 
     /**
-     * S3: a 400 returned during login is still surfaced as an authentication failure, because
-     * {@code login()} re-wraps any transport-level failure - so removing 400 from the shared
-     * authentication branch did not weaken bad-credential reporting.
+     * S3: a 400 returned during login is still surfaced as an authentication failure - {@code login()}
+     * specifically re-wraps a 400 (live-observed as the login endpoint's way of rejecting a bad username/
+     * password combination), so removing 400 from the shared authentication branch did not weaken
+     * bad-credential reporting for login itself. See {@link #timeoutDuringLoginIsNotMisreportedAsBadCredentials}
+     * for the case that <em>isn't</em> re-wrapped.
      */
     @Test
     public void badRequestDuringLoginIsStillAnAuthenticationFailure() {
         enqueue(HttpStatus.BAD_REQUEST_400, "{\"detail\":\"bad credentials\"}");
 
         assertThrows(DiagralAuthenticationException.class, () -> client.authenticate());
+    }
+
+    /**
+     * A network/server failure during login must not be misreported as a bad credential: {@code login()}
+     * used to blanket-wrap every {@link DiagralException} into a {@link DiagralAuthenticationException},
+     * so a timeout here (this API's baseline flakiness, documented elsewhere in this bundle) told the user
+     * to check their password when nothing was wrong with it. Only a 400 gets that treatment now - a
+     * timeout propagates as the plain {@link DiagralException} it actually is.
+     */
+    @Test
+    public void timeoutDuringLoginIsNotMisreportedAsBadCredentials() {
+        // The one request authenticate() issues before this failure (login()'s POST) needs the same
+        // stubbing setUp() gives every request, except send() throws instead of returning a response.
+        when(httpClient.newRequest(anyString())).thenAnswer(invocation -> {
+            String url = invocation.getArgument(0);
+            Request req = mock(Request.class);
+            when(req.method(any(HttpMethod.class))).thenReturn(req);
+            when(req.header(anyString(), any())).thenReturn(req);
+            when(req.timeout(anyLong(), any())).thenReturn(req);
+            when(req.content(any())).thenReturn(req);
+            when(req.getMethod()).thenReturn(HttpMethod.POST.asString());
+            when(req.getURI()).thenReturn(URI.create(url));
+            when(req.send()).thenThrow(new java.util.concurrent.TimeoutException());
+            return req;
+        });
+
+        DiagralException thrown = assertThrows(DiagralException.class, () -> client.authenticate());
+
+        assertThat(thrown, is(not(instanceOf(DiagralAuthenticationException.class))));
+    }
+
+    /**
+     * Same reasoning as {@link #timeoutDuringLoginIsNotMisreportedAsBadCredentials}, for a 5xx response
+     * instead of a transport-level timeout: a server error is still not evidence the credentials are wrong.
+     */
+    @Test
+    public void serverErrorDuringLoginIsAnApiExceptionNotAnAuthenticationFailure() {
+        enqueue(HttpStatus.INTERNAL_SERVER_ERROR_500, "");
+
+        DiagralApiException thrown = assertThrows(DiagralApiException.class, () -> client.authenticate());
+
+        assertThat(thrown.getStatusCode(), is(HttpStatus.INTERNAL_SERVER_ERROR_500));
+        assertThat(thrown, is(not(instanceOf(DiagralAuthenticationException.class))));
     }
 
     /**

@@ -538,6 +538,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
                     "Authentication failed: " + e.getMessage());
             throw e;
+        } catch (DiagralException e) {
+            // Distinct from the branch above: a network/server problem encountered while trying to
+            // authenticate (e.g. a timeout during login, which this API produces routinely) is not
+            // evidence the credentials are wrong, so it must not be reported the same way - see
+            // DiagralHttpClient.authenticate()'s Javadoc for why login()/generateApiKey() now distinguish
+            // the two cases.
+            logger.warn("Could not reach the Diagral API to authenticate: {}", e.getMessage());
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
+                    "Could not reach the Diagral API: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -1156,7 +1166,11 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
             // outputDelay seconds before /status settles on the final named mode, at which point
             // isGroupActive() switches back to deriving straight from configuration anyway. Only done on
             // confirmed success - see the finally block below for the ambiguous (timeout/error) case.
-            Set<String> targetMembers = groupsForMode(mode, captureSnapshot());
+            // Reads the (usually-cached) configuration directly rather than capturing a whole snapshot:
+            // groupsForMode() never looks at anything else a snapshot would carry, so capturing one here
+            // would risk an extra, redundant status fetch moments before command()'s own re-poll fetches
+            // it again anyway.
+            Set<String> targetMembers = groupsForMode(mode, getSystemConfiguration());
             if (targetMembers != null) {
                 activeGroupIds.clear();
                 activeGroupIds.addAll(targetMembers);
@@ -1283,7 +1297,7 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
         String mode = status == null ? null : status.status;
         boolean result;
         if (mode != null && NAMED_SYSTEM_MODES.contains(mode)) {
-            Set<String> members = groupsForMode(mode, snapshot);
+            Set<String> members = groupsForMode(mode, snapshot.configuration());
             result = members != null && members.contains(groupId);
             logger.trace("isGroupActive({}): status={} (named mode), configMembers={}, result={}", groupId, mode,
                     members, result);
@@ -1345,17 +1359,16 @@ public class DiagralBridgeHandler extends ConfigStatusBridgeHandler implements D
     }
 
     /**
-     * Computes the set of group IDs a given whole-system mode arms, from the cached system configuration's
-     * static per-mode membership lists.
+     * Computes the set of group IDs a given whole-system mode arms, from the system configuration's static
+     * per-mode membership lists.
      *
      * @param mode one of the five named modes ({@link
      *            org.openhab.binding.diagral.internal.DiagralBindingConstants#NAMED_SYSTEM_MODES})
-     * @param snapshot the shared view of the system this refresh cycle is working from
-     * @return the member group IDs for {@code mode}, or {@code null} if the system configuration isn't
-     *         cached yet (too early to tell) or {@code mode} isn't a recognized named mode
+     * @param config the system configuration to read the per-mode membership lists from
+     * @return the member group IDs for {@code mode}, or {@code null} if {@code config} is {@code null}
+     *         (not cached yet - too early to tell) or {@code mode} isn't a recognized named mode
      */
-    private @Nullable Set<String> groupsForMode(String mode, DiagralPollSnapshot snapshot) {
-        DiagralSystemConfiguration config = snapshot.configuration();
+    private @Nullable Set<String> groupsForMode(String mode, @Nullable DiagralSystemConfiguration config) {
         if (config == null) {
             return null;
         }

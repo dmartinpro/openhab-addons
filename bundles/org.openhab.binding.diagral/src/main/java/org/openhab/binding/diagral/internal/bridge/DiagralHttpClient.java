@@ -111,9 +111,11 @@ public class DiagralHttpClient {
      * 401/403 clears the keys and the next poll authenticates again.
      * </p>
      *
-     * @throws DiagralAuthenticationException if authentication fails
+     * @throws DiagralAuthenticationException if the credentials themselves were rejected
+     * @throws DiagralException if authentication could not be completed for any other reason
+     *             (network/timeout, or an API error unrelated to the credentials) - see {@link #login()}
      */
-    public void authenticate() throws DiagralAuthenticationException {
+    public void authenticate() throws DiagralException {
         try {
             logger.debug("Starting authentication for user: {}", authManager.getUsername());
 
@@ -131,7 +133,11 @@ public class DiagralHttpClient {
             generateApiKey(accessToken);
 
             logger.info("Authentication successful");
-        } catch (DiagralAuthenticationException e) {
+        } catch (DiagralException e) {
+            // Widened from DiagralAuthenticationException: login()/generateApiKey() can now also fail with
+            // a plain DiagralException/DiagralApiException for a network/server problem unrelated to the
+            // credentials (see their Javadoc) - the keys are cleared either way, since this attempt did
+            // not succeed regardless of why.
             authManager.clearApiKeys();
             throw e;
         }
@@ -168,67 +174,101 @@ public class DiagralHttpClient {
      * Performs login and returns the access token
      *
      * @return the access token
-     * @throws DiagralAuthenticationException if login fails
+     * @throws DiagralAuthenticationException if the login endpoint rejects the credentials themselves
+     *             (400, or a missing/empty access token in an otherwise successful response)
+     * @throws DiagralException if login could not be completed for any other reason (network/timeout, or
+     *             an API error unrelated to the credentials, such as 404/429/5xx) - not evidence the
+     *             credentials are wrong, so it is deliberately not reported as one; see this bundle's
+     *             {@code CLAUDE.md} for the live-observed case (a login timeout) this distinction fixes
      */
-    private String login() throws DiagralAuthenticationException {
+    private String login() throws DiagralException {
         String url = API_BASE_URL + API_ENDPOINT_LOGIN + "?vendor=" + VENDOR_PARAM;
 
         // The auth manager builds this itself so the password never leaves that class (see
         // DiagralAuthenticationManager#createLoginRequest).
         String requestBody = gson.toJson(authManager.createLoginRequest());
 
+        String responseBody;
         try {
             // The login response carries an access token, so its body must never be logged.
-            String responseBody = executeUnauthenticatedPost(url, requestBody, true);
-            DiagralLoginResponse response = gson.fromJson(responseBody, DiagralLoginResponse.class);
-
-            String token = (response != null) ? response.accessToken : null;
-            if (token == null || token.isEmpty()) {
-                throw new DiagralAuthenticationException("Login failed: No access token received");
+            responseBody = executeUnauthenticatedPost(url, requestBody, true);
+        } catch (DiagralApiException e) {
+            // A 400 here means the login endpoint rejected the given username/password outright
+            // (live-observed returning {"detail":"bad credentials"}), so it is still reported as a
+            // credential problem, same as before. Anything else (404/429/5xx) is a genuine API problem
+            // unrelated to whether the credentials are correct - propagate it as-is rather than
+            // fabricating an authentication failure. A plain network failure (timeout, connection reset)
+            // isn't caught here at all, so it already propagates unchanged.
+            if (e.getStatusCode() == HttpStatus.BAD_REQUEST_400) {
+                throw new DiagralAuthenticationException("Login failed: " + e.getMessage(), e);
             }
+            throw e;
+        }
 
-            logger.debug("Login successful, access token obtained");
-            return token;
+        DiagralLoginResponse response;
+        try {
+            response = gson.fromJson(responseBody, DiagralLoginResponse.class);
         } catch (JsonSyntaxException e) {
             throw new DiagralAuthenticationException("Invalid JSON response from login", e);
-        } catch (DiagralException e) {
-            throw new DiagralAuthenticationException("Login request failed", e);
         }
+
+        String token = (response != null) ? response.accessToken : null;
+        if (token == null || token.isEmpty()) {
+            throw new DiagralAuthenticationException("Login failed: No access token received");
+        }
+
+        logger.debug("Login successful, access token obtained");
+        return token;
     }
 
     /**
      * Generates API key pair using the access token
      *
      * @param accessToken the access token from login
-     * @throws DiagralAuthenticationException if API key generation fails
+     * @throws DiagralAuthenticationException if the request is rejected as invalid (400), or the response
+     *             doesn't carry a usable key pair
+     * @throws DiagralException if the request could not be completed for any other reason (network/timeout,
+     *             or an API error unrelated to the credentials, such as 404/429/5xx) - see {@link #login()}
+     *             for why this distinction matters
      */
-    private void generateApiKey(String accessToken) throws DiagralAuthenticationException {
+    private void generateApiKey(String accessToken) throws DiagralException {
         String url = API_BASE_URL + API_ENDPOINT_API_KEY;
 
         DiagralApiKeyRequest apiKeyRequest = new DiagralApiKeyRequest(authManager.getSerialId());
         String requestBody = gson.toJson(apiKeyRequest);
 
+        logger.debug("Generating a new API key pair for serial ID {}", authManager.getSerialId());
+
+        String responseBody;
         try {
-            logger.debug("Generating a new API key pair for serial ID {}", authManager.getSerialId());
-
             // The response carries the API key AND its secret signing key, so its body must never be logged.
-            String responseBody = executeWithToken(url, HttpMethod.POST, requestBody, accessToken, true);
-            DiagralApiKeyResponse response = gson.fromJson(responseBody, DiagralApiKeyResponse.class);
-
-            String apiKey = (response != null) ? response.apiKey : null;
-            String secretKey = (response != null) ? response.secretKey : null;
-
-            if (apiKey == null || secretKey == null) {
-                throw new DiagralAuthenticationException("API key generation failed: Invalid response");
+            responseBody = executeWithToken(url, HttpMethod.POST, requestBody, accessToken, true);
+        } catch (DiagralApiException e) {
+            // Same reasoning as login()'s matching catch: a 400 means this specific request was rejected
+            // as invalid, still worth surfacing as an authentication problem; anything else is a
+            // network/API issue that must not be reported as one.
+            if (e.getStatusCode() == HttpStatus.BAD_REQUEST_400) {
+                throw new DiagralAuthenticationException("API key generation failed: " + e.getMessage(), e);
             }
+            throw e;
+        }
 
-            authManager.setApiKeys(apiKey, secretKey);
-            logger.debug("API key pair generated successfully");
+        DiagralApiKeyResponse response;
+        try {
+            response = gson.fromJson(responseBody, DiagralApiKeyResponse.class);
         } catch (JsonSyntaxException e) {
             throw new DiagralAuthenticationException("Invalid JSON response from API key generation", e);
-        } catch (DiagralException e) {
-            throw new DiagralAuthenticationException("API key generation request failed", e);
         }
+
+        String apiKey = (response != null) ? response.apiKey : null;
+        String secretKey = (response != null) ? response.secretKey : null;
+
+        if (apiKey == null || secretKey == null) {
+            throw new DiagralAuthenticationException("API key generation failed: Invalid response");
+        }
+
+        authManager.setApiKeys(apiKey, secretKey);
+        logger.debug("API key pair generated successfully");
     }
 
     /**

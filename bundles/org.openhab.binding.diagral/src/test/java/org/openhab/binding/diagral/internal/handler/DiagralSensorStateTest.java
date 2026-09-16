@@ -19,6 +19,7 @@ import static org.mockito.Mockito.*;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
 import java.util.Map;
+import java.util.Objects;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,8 @@ import org.openhab.core.thing.ThingUID;
 import org.openhab.core.thing.binding.ThingHandlerCallback;
 import org.openhab.core.types.State;
 import org.openhab.core.types.UnDefType;
+
+import com.google.gson.Gson;
 
 /**
  * Unit tests for finding C5 of the 2026-09-04 review: the motion and contact channels must report
@@ -172,6 +175,28 @@ public class DiagralSensorStateTest {
         invokeUpdateChannels(handler, device);
 
         assertThat(captureState(callback, CHANNEL_LOW_BATTERY), is(OnOffType.ON));
+    }
+
+    /**
+     * Regression guard for the auto-unboxing NPE risk found during review: if the API ever sends an
+     * anomaly flag as an explicit JSON null (a map value of {@code null}, not simply an absent key),
+     * deriving {@code low-battery} from it must not throw - it should just read as "not low".
+     */
+    @Test
+    public void lowBatteryChannelToleratesAnExplicitNullAnomalyValue() throws Exception {
+        Thing thing = mock(Thing.class);
+        DiagralMotionSensorHandler handler = new DiagralMotionSensorHandler(thing);
+        ThingHandlerCallback callback = wire(handler, thing, CHANNEL_LOW_BATTERY);
+
+        // Built via Gson rather than Map.put(): the null value under test is exactly what the
+        // null-checker correctly refuses for hand-written code against a Map<String, Boolean> field, but
+        // Gson populates it via reflection at runtime regardless - precisely how a real API response with
+        // an explicit JSON null would reach this map.
+        DiagralDevice device = Objects.requireNonNull(new Gson()
+                .fromJson("{\"anomalies\":{\"" + DEVICE_ANOMALY_POWER_SUPPLY_ALERT + "\":null}}", DiagralDevice.class));
+        invokeUpdateChannels(handler, device);
+
+        assertThat(captureState(callback, CHANNEL_LOW_BATTERY), is(OnOffType.OFF));
     }
 
     /**

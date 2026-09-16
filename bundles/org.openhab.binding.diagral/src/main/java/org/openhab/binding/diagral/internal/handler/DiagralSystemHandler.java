@@ -16,6 +16,7 @@ import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
@@ -251,15 +252,12 @@ public class DiagralSystemHandler extends DiagralBaseThingHandler {
         }
 
         // Update central unit battery status
-        if (config.centralInformation != null && config.centralInformation.anomalies != null
-                && ((config.centralInformation.anomalies.containsKey(DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT)
-                        && config.centralInformation.anomalies.get(DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT))
-                        || (config.centralInformation.anomalies.containsKey(DEVICE_ANOMALY_SECOND_POWERSUPPLY_ALERT)
-                                && config.centralInformation.anomalies.get(DEVICE_ANOMALY_SECOND_POWERSUPPLY_ALERT)))) {
-            updateState(CHANNEL_CENTRAL_LOW_BATTERY, OnOffType.ON);
-        } else {
-            updateState(CHANNEL_CENTRAL_LOW_BATTERY, OnOffType.OFF);
-        }
+        Map<String, Boolean> centralAnomalies = config.centralInformation == null ? null
+                : config.centralInformation.anomalies;
+        boolean centralLowBattery = centralAnomalies != null
+                && (Boolean.TRUE.equals(centralAnomalies.get(DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT))
+                        || Boolean.TRUE.equals(centralAnomalies.get(DEVICE_ANOMALY_SECOND_POWERSUPPLY_ALERT)));
+        updateState(CHANNEL_CENTRAL_LOW_BATTERY, OnOffType.from(centralLowBattery));
 
         // Update anomalies - resolved lazily by the snapshot, so this is the only handler that pays
         // for the fetch, and only once per cycle no matter how many handlers share the snapshot.

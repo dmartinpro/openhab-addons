@@ -12,6 +12,7 @@
  */
 package org.openhab.binding.diagral.internal.handler;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.mockito.Mockito.*;
 import static org.openhab.binding.diagral.internal.DiagralBindingConstants.*;
@@ -24,18 +25,27 @@ import org.eclipse.jdt.annotation.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.openhab.binding.diagral.internal.bridge.DiagralBridgeHandler;
+import org.openhab.binding.diagral.internal.bridge.DiagralPollSnapshot;
+import org.openhab.binding.diagral.internal.dto.DiagralCentral;
+import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
+import org.openhab.binding.diagral.internal.dto.DiagralSystemStatus;
 import org.openhab.core.config.core.Configuration;
+import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingUID;
 import org.openhab.core.thing.binding.ThingHandlerCallback;
+import org.openhab.core.types.State;
+
+import com.google.gson.Gson;
 
 /**
  * Unit tests for {@link DiagralSystemHandler}, covering the multi-group {@code activate-groups}/
@@ -67,6 +77,7 @@ public class DiagralSystemHandlerTest {
     }
 
     private @Mock @NonNullByDefault({}) DiagralBridgeHandler bridgeHandler;
+    private @Mock @NonNullByDefault({}) ThingHandlerCallback callback;
 
     private @NonNullByDefault({}) TestableDiagralSystemHandler handler;
     private @NonNullByDefault({}) ChannelUID activateGroupsChannel;
@@ -84,7 +95,7 @@ public class DiagralSystemHandlerTest {
 
         handler = new TestableDiagralSystemHandler(thing);
         handler.bridge = bridge;
-        handler.setCallback(mock(ThingHandlerCallback.class));
+        handler.setCallback(callback);
 
         activateGroupsChannel = new ChannelUID(thingUID, CHANNEL_ACTIVATE_GROUPS);
         disableGroupsChannel = new ChannelUID(thingUID, CHANNEL_DISABLE_GROUPS);
@@ -165,5 +176,40 @@ public class DiagralSystemHandlerTest {
         verify(bridgeHandler, never()).activateGroups(any());
         verify(bridgeHandler, never()).disableGroups(any());
         verify(bridgeHandler, never()).setSystemMode(any());
+    }
+
+    /**
+     * Regression guard for the auto-unboxing NPE risk found during review: if the API ever sends a central
+     * unit anomaly flag as an explicit JSON null (a map value of {@code null}, not simply an absent key),
+     * deriving {@code central-low-battery} from it must not throw - it should just read as "not low".
+     */
+    @Test
+    public void centralLowBatteryToleratesAnExplicitNullAnomalyValue() {
+        DiagralSystemStatus status = new DiagralSystemStatus();
+        status.status = MODE_OFF;
+
+        DiagralSystemConfiguration config = new DiagralSystemConfiguration();
+        // Built via Gson rather than Map.put(): the null value under test is exactly what the null-checker
+        // correctly refuses for hand-written code against a Map<String, Boolean> field, but Gson populates
+        // it via reflection at runtime regardless - precisely how a real API response with an explicit
+        // JSON null would reach this map.
+        config.centralInformation = new Gson().fromJson(
+                "{\"anomalies\":{\"" + DEVICE_ANOMALY_MAIN_POWERSUPPLY_ALERT + "\":null}}", DiagralCentral.class);
+
+        DiagralPollSnapshot snapshot = new DiagralPollSnapshot(status, config, () -> null);
+
+        handler.refreshStatus(snapshot);
+
+        ArgumentCaptor<ChannelUID> uid = ArgumentCaptor.forClass(ChannelUID.class);
+        ArgumentCaptor<State> state = ArgumentCaptor.forClass(State.class);
+        verify(callback, atLeastOnce()).stateUpdated(uid.capture(), state.capture());
+
+        for (int i = 0; i < uid.getAllValues().size(); i++) {
+            if (CHANNEL_CENTRAL_LOW_BATTERY.equals(uid.getAllValues().get(i).getId())) {
+                assertThat(state.getAllValues().get(i), is(OnOffType.OFF));
+                return;
+            }
+        }
+        throw new AssertionError("no state published to channel " + CHANNEL_CENTRAL_LOW_BATTERY);
     }
 }

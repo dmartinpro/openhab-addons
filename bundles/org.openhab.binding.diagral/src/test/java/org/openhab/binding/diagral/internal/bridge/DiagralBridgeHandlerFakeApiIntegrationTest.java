@@ -14,8 +14,11 @@ package org.openhab.binding.diagral.internal.bridge;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -42,6 +45,8 @@ import org.junit.jupiter.api.Test;
 import org.openhab.binding.diagral.internal.dto.DiagralAnomalies;
 import org.openhab.binding.diagral.internal.dto.DiagralGroup;
 import org.openhab.binding.diagral.internal.dto.DiagralSystemConfiguration;
+import org.openhab.binding.diagral.internal.exception.DiagralAuthenticationException;
+import org.openhab.binding.diagral.internal.exception.DiagralException;
 import org.openhab.binding.diagral.internal.testsupport.FakeDiagralApiServer;
 import org.openhab.core.config.core.Configuration;
 import org.openhab.core.thing.Bridge;
@@ -246,6 +251,27 @@ public class DiagralBridgeHandlerFakeApiIntegrationTest {
         DiagralSystemConfiguration configuration = Objects.requireNonNull(handler.getSystemConfiguration());
         assertThat("configured group index 2 was not returned",
                 configuration.groups.stream().anyMatch(g -> g.index == 2), is(true));
+    }
+
+    /**
+     * A network failure during the login call itself must not be reported the same way a genuinely bad
+     * password would be. Regression test for the bug where {@code DiagralHttpClient.login()} blanket-wrapped
+     * every failure into a {@link DiagralAuthenticationException}, which the bridge's {@code authenticate()}
+     * then always surfaced as {@code ThingStatusDetail.CONFIGURATION_ERROR} ("check your credentials") -
+     * even for a plain timeout, which this API produces routinely (see this bundle's {@code CLAUDE.md}).
+     */
+    @Test
+    public void networkFailureDuringLoginIsReportedAsCommunicationErrorNotBadCredentials() {
+        fakeServer.injectTimeout();
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, this::invokeAuthenticate);
+
+        Throwable cause = thrown.getCause();
+        assertThat(cause, is(instanceOf(DiagralException.class)));
+        assertThat(cause, is(not(instanceOf(DiagralAuthenticationException.class))));
+
+        verify(callback).statusUpdated(eq(bridge), argThat(info -> info.getStatus() == ThingStatus.OFFLINE
+                && info.getStatusDetail() == ThingStatusDetail.COMMUNICATION_ERROR));
     }
 
     /**
@@ -477,5 +503,23 @@ public class DiagralBridgeHandlerFakeApiIntegrationTest {
         handler.activateGroup("2");
 
         assertThat(countRequestsTo("/activate_group"), equalTo(2L));
+    }
+
+    /**
+     * {@code setSystemMode()}'s optimistic active-group update reads the system configuration directly
+     * rather than capturing a whole snapshot (which would trigger its own status fetch). Regression test
+     * for the extra, redundant {@code GET /status} this used to send moments before {@code command()}'s
+     * own re-poll fetches it again anyway - one mode change must reach {@code /status} exactly once.
+     */
+    @Test
+    public void settingSystemModeFetchesStatusOnlyOnceViaTheRepoll() throws Exception {
+        fakeServer.setSystemConfiguration(configurationWithOneGroup());
+        invokeAuthenticate();
+        long statusRequestsBefore = countRequestsTo("/status");
+
+        handler.setSystemMode(MODE_FULL);
+
+        assertThat(waitUntil(() -> countRequestsTo("/status") > statusRequestsBefore), is(true));
+        assertThat(countRequestsTo("/status") - statusRequestsBefore, equalTo(1L));
     }
 }

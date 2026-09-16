@@ -245,12 +245,9 @@ public abstract class DiagralSensorHandler extends DiagralBaseThingHandler {
         // Update common sensor channels
         updateState(CHANNEL_ENABLED, OnOffType.from(!device.inhibited));
 
-        if (device.anomalies != null && device.anomalies.containsKey(DEVICE_ANOMALY_POWER_SUPPLY_ALERT)
-                && device.anomalies.get(DEVICE_ANOMALY_POWER_SUPPLY_ALERT)) {
-            updateState(CHANNEL_LOW_BATTERY, OnOffType.ON);
-        } else {
-            updateState(CHANNEL_LOW_BATTERY, OnOffType.OFF);
-        }
+        boolean lowBattery = device.anomalies != null
+                && Boolean.TRUE.equals(device.anomalies.get(DEVICE_ANOMALY_POWER_SUPPLY_ALERT));
+        updateState(CHANNEL_LOW_BATTERY, OnOffType.from(lowBattery));
 
         // Let subclasses update their specific channels
         updateSensorSpecificChannels(device);
