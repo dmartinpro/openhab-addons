@@ -49,10 +49,19 @@ public class NavimowBindingConstants {
     public static final String CHANNEL_BATTERY_LEVEL = "battery-level";
 
     /**
+     * Mirrors {@code Thing.PROPERTY_MODEL_ID} as a channel too, so UIs (dashboards/widgets) can bind an
+     * Item to it directly instead of having to fetch the Thing's properties separately - Thing
+     * properties aren't otherwise reachable as bindable state. Both are kept in sync from the same
+     * {@code authList} data; the property remains useful for generic Thing tooling (inbox, Thing list)
+     * that doesn't go through an Item.
+     */
+    public static final String CHANNEL_MODEL = "model";
+
+    /**
      * Human-readable battery tier from {@code getVehicleStatus} (e.g. {@code "HIGH"}), surfaced as a
      * Thing property since it isn't precise enough to warrant its own channel alongside
-     * {@link #CHANNEL_BATTERY_LEVEL}. Model and firmware use core's own {@code Thing.PROPERTY_MODEL_ID}/
-     * {@code PROPERTY_FIRMWARE_VERSION} instead of a binding-specific constant.
+     * {@link #CHANNEL_BATTERY_LEVEL}. Firmware uses core's own {@code Thing.PROPERTY_FIRMWARE_VERSION}
+     * instead of a binding-specific constant.
      */
     public static final String PROPERTY_BATTERY_TIER = "batteryTier";
 

@@ -49,6 +49,7 @@ your Navimow account. Once signed in, the bridge goes `ONLINE` automatically.
 | `activity`      | String            | R          | The mower's current canonical activity: `idle`, `mowing`, `paused`, `docked`, `charging`, `returning`, `error`, `unknown`. |
 | `control`       | String            | W          | Sends a command to the mower: `START`, `STOP`, `PAUSE`, `RESUME`, `DOCK`.                       |
 | `battery-level` | Number (`system.battery-level`) | R | Battery level as a percentage (0-100%).                                                    |
+| `model`         | String            | R          | The mower's model, e.g. `X430`, as reported by the cloud API. Mirrors the `modelId` Thing property (below) as a bindable channel, for UIs that want to key off the model without a separate Thing lookup. |
 
 ### Thing Properties
 
@@ -57,7 +58,7 @@ poll cycle:
 
 | Property           | Description                                                                 |
 |--------------------|-------------------------------------------------------------------------------|
-| `modelId`          | The mower's model, e.g. `X430`.                                              |
+| `modelId`          | The mower's model, e.g. `X430`. Also available as the `model` channel above. |
 | `firmwareVersion`  | The mower's firmware version string.                                        |
 | `batteryTier`      | A human-readable battery tier reported by the cloud API, e.g. `HIGH`.       |
 
@@ -77,6 +78,7 @@ Bridge navimow:account:myaccount [ pollingInterval=60, enableMqtt=false ] {
 String    Navimow_Activity  "Activity"       { channel="navimow:mower:myaccount:mymower:activity" }
 String    Navimow_Control   "Control"        { channel="navimow:mower:myaccount:mymower:control" }
 Number    Navimow_Battery   "Battery [%d %%]" { channel="navimow:mower:myaccount:mymower:battery-level" }
+String    Navimow_Model     "Model"          { channel="navimow:mower:myaccount:mymower:model" }
 ```
 
 ## Known Limitations

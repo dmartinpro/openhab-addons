@@ -47,6 +47,7 @@
 			<channel id="activity" typeId="activity"/>
 			<channel id="control" typeId="control"/>
 			<channel id="battery-level" typeId="system.battery-level"/>
+			<channel id="model" typeId="model"/>
 		</channels>
 
 		<representation-property>id</representation-property>
@@ -90,5 +91,13 @@
 				<option value="DOCK">Return to Dock</option>
 			</options>
 		</command>
+	</channel-type>
+
+	<channel-type id="model">
+		<item-type>String</item-type>
+		<label>Model</label>
+		<description>The mower's model, e.g. "X430", as reported by the cloud API. Mirrors the Thing's modelId property as a
+			bindable channel.</description>
+		<state readOnly="true"/>
 	</channel-type>
 </thing:thing-descriptions>

@@ -15,6 +15,7 @@ package org.openhab.binding.navimow.internal.handler;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_ACTIVITY;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_BATTERY_LEVEL;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_CONTROL;
+import static org.openhab.binding.navimow.internal.NavimowBindingConstants.CHANNEL_MODEL;
 import static org.openhab.binding.navimow.internal.NavimowBindingConstants.PROPERTY_BATTERY_TIER;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -161,10 +162,12 @@ public class NavimowMowerHandler extends BaseThingHandler {
     }
 
     /**
-     * Refreshes this mower's static device-metadata Thing properties. Called by
-     * {@link NavimowAccountHandler} once per poll cycle, from the same {@code authList} response it
-     * already fetches to resolve device ids - self-correcting rather than a one-time discovery-time
-     * snapshot, so a firmware update is reflected without needing to re-discover the Thing.
+     * Refreshes this mower's static device-metadata Thing properties (and, for the model, the mirroring
+     * {@code model} channel - see {@link org.openhab.binding.navimow.internal.NavimowBindingConstants#CHANNEL_MODEL}
+     * for why both exist). Called by {@link NavimowAccountHandler} once per poll cycle, from the same
+     * {@code authList} response it already fetches to resolve device ids - self-correcting rather than
+     * a one-time discovery-time snapshot, so a firmware update is reflected without needing to
+     * re-discover the Thing.
      *
      * @param device this mower's entry from the latest {@code authList} response
      */
@@ -172,6 +175,7 @@ public class NavimowMowerHandler extends BaseThingHandler {
         String model = device.model;
         if (model != null) {
             updateProperty(Thing.PROPERTY_MODEL_ID, model);
+            updateState(CHANNEL_MODEL, new StringType(model));
         }
         String firmware = device.firmware;
         if (firmware != null) {
