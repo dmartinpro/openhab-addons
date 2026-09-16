@@ -42,6 +42,12 @@ public abstract class NavimowServlet extends HttpServlet {
 
     protected final NavimowAccountHandler handler;
 
+    /**
+     * @param handler the owning account bridge, used to scope this servlet's path uniquely
+     * @param httpService the OSGi HTTP service to register with
+     * @param localPath the path segment identifying this servlet's purpose (e.g. {@code "connect"}),
+     *            distinct from other servlets registered by the same handler
+     */
     protected NavimowServlet(NavimowAccountHandler handler, HttpService httpService, String localPath) {
         this.handler = handler;
         this.httpService = httpService;
@@ -68,6 +74,9 @@ public abstract class NavimowServlet extends HttpServlet {
         this.destroy();
     }
 
+    /**
+     * @return the path this servlet is (or will be) registered at, relative to the openHAB server root
+     */
     public String getPath() {
         return path;
     }

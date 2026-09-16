@@ -38,14 +38,20 @@ public class NavimowBindingConstants {
     public static final String BINDING_ID = "navimow";
 
     // List of all Thing Type UIDs
+    /** The account bridge thing type - one per Segway Navimow cloud account. */
     public static final ThingTypeUID THING_TYPE_ACCOUNT = new ThingTypeUID(BINDING_ID, "account");
+    /** The mower thing type - one per robotic lawn mower linked to an account. */
     public static final ThingTypeUID THING_TYPE_MOWER = new ThingTypeUID(BINDING_ID, "mower");
 
+    /** Every thing type this binding's {@code NavimowHandlerFactory} can create a handler for. */
     public static final Set<ThingTypeUID> SUPPORTED_THING_TYPES_UIDS = Set.of(THING_TYPE_ACCOUNT, THING_TYPE_MOWER);
 
     // List of all Channel ids
+    /** The mower's canonical activity - see {@code NavimowActivity} for the possible values. */
     public static final String CHANNEL_ACTIVITY = "activity";
+    /** Sends a mower command - see {@code NavimowCommand} for the accepted values. */
     public static final String CHANNEL_CONTROL = "control";
+    /** Battery level as a percentage (0-100). */
     public static final String CHANNEL_BATTERY_LEVEL = "battery-level";
 
     /**
@@ -92,8 +98,11 @@ public class NavimowBindingConstants {
     /** Base URL for the REST "smarthome" API surface (device list, status, commands). */
     public static final String API_BASE_URL = "https://navimow-fra.ninebot.com/openapi/smarthome";
 
+    /** Lists the devices linked to the authenticated account, appended to {@link #API_BASE_URL}. */
     public static final String API_PATH_AUTH_LIST = "/authList";
+    /** Fetches current device status, appended to {@link #API_BASE_URL}. */
     public static final String API_PATH_GET_VEHICLE_STATUS = "/getVehicleStatus";
+    /** Sends a mower command, appended to {@link #API_BASE_URL}. */
     public static final String API_PATH_SEND_COMMANDS = "/sendCommands";
 
     /**

@@ -100,6 +100,12 @@ public class NavimowAccountHandler extends BaseBridgeHandler
     private volatile @Nullable ScheduledFuture<?> pollingJob;
     private volatile @Nullable ScheduledFuture<?> reconnectJob;
 
+    /**
+     * @param bridge the account bridge Thing this handler is for
+     * @param httpClient the shared Jetty client used for all REST/MQTT-credential requests
+     * @param httpService the OSGi HTTP service, passed through to {@link NavimowConnectServlet}
+     * @param oAuthFactory used to create/tear down this bridge's {@code OAuthClientService}
+     */
     public NavimowAccountHandler(Bridge bridge, HttpClient httpClient, HttpService httpService,
             OAuthFactory oAuthFactory) {
         super(bridge);
@@ -347,10 +353,22 @@ public class NavimowAccountHandler extends BaseBridgeHandler
         }
     }
 
+    /**
+     * Registers a mower handler so {@link #poll()} and {@link #onVehicleState} can dispatch updates to
+     * it by device id. Called by {@code NavimowMowerHandler.initialize()}.
+     *
+     * @param deviceId the mower's device id
+     * @param handler the handler to dispatch updates to
+     */
     public void registerMowerHandler(String deviceId, NavimowMowerHandler handler) {
         mowerHandlers.put(deviceId, handler);
     }
 
+    /**
+     * Reverses {@link #registerMowerHandler}. Called by {@code NavimowMowerHandler.dispose()}.
+     *
+     * @param deviceId the mower's device id
+     */
     public void unregisterMowerHandler(String deviceId) {
         mowerHandlers.remove(deviceId);
     }

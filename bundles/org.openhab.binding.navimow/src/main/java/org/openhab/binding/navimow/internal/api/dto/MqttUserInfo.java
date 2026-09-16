@@ -26,8 +26,9 @@ import org.eclipse.jdt.annotation.Nullable;
  * {@code mqttHost} a {@code wss://} URL, {@code mqttUrl} a path of the form {@code /mqtt/<numeric-id>}.
  *
  * <p>
- * Not currently used anywhere in this binding - it exists to make the endpoint testable in
- * isolation, ahead of any actual MQTT support (this binding is REST-only for now).
+ * Used by {@link org.openhab.binding.navimow.internal.mqtt.NavimowMqttConnection#connect} to open the
+ * optional MQTT push connection - see that class's Javadoc for what the connection is actually good
+ * for (push latency, not new data).
  *
  * @author David Martin - Initial contribution
  */

@@ -55,10 +55,17 @@ public enum NavimowCommand {
         this.params = params;
     }
 
+    /**
+     * @return the Google Smart Home-style execution verb {@code sendCommands} expects for this command
+     */
     public String getExecutionCommand() {
         return executionCommand;
     }
 
+    /**
+     * @return the parameters accompanying {@link #getExecutionCommand()}, or {@code null} for a
+     *         parameterless command (e.g. {@link #DOCK})
+     */
     public @Nullable Map<String, Object> getParams() {
         return params;
     }

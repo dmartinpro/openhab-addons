@@ -54,10 +54,22 @@ public class NavimowConnectServlet extends NavimowServlet {
 
     private final Logger logger = LoggerFactory.getLogger(NavimowConnectServlet.class);
 
+    /**
+     * @param handler the owning account bridge, notified via
+     *            {@link NavimowAccountHandler#completeAuthorization(String, String)} once Navimow
+     *            redirects back with an authorization code
+     * @param httpService the OSGi HTTP service to register this servlet with
+     */
     public NavimowConnectServlet(NavimowAccountHandler handler, HttpService httpService) {
         super(handler, httpService, "connect");
     }
 
+    /**
+     * Handles all three states of the OAuth2 flow this servlet drives: an initial visit (no query
+     * parameters, shows the sign-in link), an error redirect ({@code ?error=...}, shows the failure),
+     * and a success redirect ({@code ?code=...}, hands the code to the account handler and shows a
+     * closing message).
+     */
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         StringBuffer requestUrl = req.getRequestURL();
@@ -73,7 +85,8 @@ public class NavimowConnectServlet extends NavimowServlet {
         resp.setContentType(CONTENT_TYPE);
         if (error != null) {
             logger.debug("Navimow redirected with an error: {}", error);
-            resp.getWriter().append(renderPage("Authorization failed", "Navimow reported an error: " + error));
+            resp.getWriter()
+                    .append(renderPage("Authorization failed", "Navimow reported an error: " + escapeHtml(error)));
             return;
         }
         if (code != null) {
@@ -89,6 +102,11 @@ public class NavimowConnectServlet extends NavimowServlet {
                 "<a href=\"" + authorizeUrl + "\">Click here to sign in to your Navimow account</a>"));
     }
 
+    /**
+     * @param redirectUri this servlet's own URL, passed back as the OAuth2 {@code redirect_uri} so
+     *            Segway's authorization server redirects the browser back here
+     * @return the full URL to Navimow's hosted login page for this bridge
+     */
     private String buildAuthorizeUrl(String redirectUri) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("channel", "homeassistant");
@@ -102,12 +120,33 @@ public class NavimowConnectServlet extends NavimowServlet {
         return OAUTH_AUTHORIZE_URL + "?" + query;
     }
 
+    /**
+     * @param value the raw value to encode
+     * @return {@code value}, URL-encoded for use in a query string
+     */
     private String urlEncode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
+    /**
+     * @param title the page title, also used as the visible heading
+     * @param bodyHtml the body content, inserted verbatim as HTML - by design, since one caller needs
+     *            to insert a real {@code <a href="...">} link. Any untrusted value (e.g. a request
+     *            parameter) must be passed through {@link #escapeHtml} by the caller first - this
+     *            method itself does not sanitize it.
+     * @return a minimal styled HTML page
+     */
     private String renderPage(String title, String bodyHtml) {
         return "<html><head><title>" + title + "</title></head><body style=\"font-family: sans-serif; padding: 2em;\">"
                 + "<h2>" + title + "</h2><p>" + bodyHtml + "</p></body></html>";
+    }
+
+    /**
+     * @param value untrusted text to make safe for insertion into an HTML text node
+     * @return {@code value} with the standard HTML special characters escaped
+     */
+    private static String escapeHtml(String value) {
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

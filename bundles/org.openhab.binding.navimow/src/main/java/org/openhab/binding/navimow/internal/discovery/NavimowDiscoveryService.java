@@ -56,6 +56,11 @@ public class NavimowDiscoveryService extends AbstractThingHandlerDiscoveryServic
         return Set.of(THING_TYPE_MOWER);
     }
 
+    /**
+     * Fetches the account's current device list and reports each device with an id as a discovery
+     * result. A device with no {@code id} (should not happen per the live-confirmed {@code authList}
+     * shape, but not otherwise guarded against) is skipped rather than failing the whole scan.
+     */
     @Override
     public void startScan() {
         try {

@@ -29,6 +29,7 @@ import org.eclipse.jdt.annotation.Nullable;
 @NonNullByDefault
 public class NavimowBridgeConfiguration {
 
+    /** REST polling interval in seconds, or {@code null} to use the thing-type default. */
     private @Nullable Integer pollingInterval;
 
     /**
@@ -49,6 +50,9 @@ public class NavimowBridgeConfiguration {
         return pollingInterval;
     }
 
+    /**
+     * @param pollingInterval the REST polling interval in seconds
+     */
     public void setPollingInterval(Integer pollingInterval) {
         this.pollingInterval = pollingInterval;
     }
@@ -60,6 +64,9 @@ public class NavimowBridgeConfiguration {
         return enableMqtt;
     }
 
+    /**
+     * @param enableMqtt whether the optional MQTT push connection should be enabled
+     */
     public void setEnableMqtt(boolean enableMqtt) {
         this.enableMqtt = enableMqtt;
     }

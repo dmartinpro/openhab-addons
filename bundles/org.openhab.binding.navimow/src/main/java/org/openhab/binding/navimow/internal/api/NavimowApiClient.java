@@ -227,12 +227,10 @@ public class NavimowApiClient {
     }
 
     /**
-     * Fetches MQTT broker connection info for the authenticated account.
-     *
-     * <p>
-     * Not called by anything in this binding yet (REST-only for now) - exists so the endpoint is
-     * independently testable through a real client rather than only via ad-hoc tools. See the class
-     * Javadoc for why that distinction turned out to matter.
+     * Fetches MQTT broker connection info for the authenticated account, used by
+     * {@link org.openhab.binding.navimow.internal.mqtt.NavimowMqttConnection#connect} to open the
+     * optional MQTT push connection. See the class Javadoc for why this call - like every other one in
+     * this class - can only succeed when made by the account bridge process itself.
      *
      * @return the MQTT connection info
      * @throws NavimowAuthenticationException if the access token was rejected
