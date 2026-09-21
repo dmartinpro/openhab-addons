@@ -33,7 +33,7 @@ class MqttVehicleStateTest {
     void parsesRealisticStateTopicPayload() {
         // Captured live 2026-09-15 from a real Navimow X430's `state` topic while mowing.
         String json = """
-                {"battery":85,"device_id":"22AAD2602Y0911","state":"isRunning","timestamp":1789471712448}
+                {"battery":85,"device_id":"EXAMPLE0DEVICE1","state":"isRunning","timestamp":1789471712448}
                 """;
 
         MqttVehicleState state = gson.fromJson(json, MqttVehicleState.class);

@@ -44,7 +44,7 @@ class NavimowDeviceStatusTest {
                     "payload": {
                       "devices": [
                         {
-                          "id": "22AAD2602Y0911",
+                          "id": "EXAMPLE0DEVICE1",
                           "vehicleState": "isRunning",
                           "capacityRemaining": [
                             { "unit": "PERCENTAGE", "rawValue": 85 }
@@ -64,7 +64,7 @@ class NavimowDeviceStatusTest {
 
         assertThat(envelope.isSuccess(), is(true));
         NavimowDeviceStatus status = envelope.data.payload.devices.get(0);
-        assertThat(status.id, is("22AAD2602Y0911"));
+        assertThat(status.id, is("EXAMPLE0DEVICE1"));
         assertThat(status.vehicleState, is("isRunning"));
         assertThat(status.getBatteryPercentage(), is(85));
         assertThat(status.descriptiveCapacityRemaining, is("HIGH"));

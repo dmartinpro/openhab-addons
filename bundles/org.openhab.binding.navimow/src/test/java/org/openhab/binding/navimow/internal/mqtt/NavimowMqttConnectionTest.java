@@ -40,17 +40,17 @@ class NavimowMqttConnectionTest {
 
     @Test
     void buildStateTopicFollowsExpectedFormat() {
-        assertThat(NavimowMqttConnection.buildStateTopic("22AAD2602Y0911"),
-                is("/downlink/vehicle/22AAD2602Y0911/realtimeDate/state"));
+        assertThat(NavimowMqttConnection.buildStateTopic("EXAMPLE0DEVICE1"),
+                is("/downlink/vehicle/EXAMPLE0DEVICE1/realtimeDate/state"));
     }
 
     @Test
     void connectRejectsMissingMqttHost() {
         MqttUserInfo info = new MqttUserInfo();
-        info.mqttUrl = "/mqtt/5329644";
+        info.mqttUrl = "/mqtt/1234567";
 
         assertThrows(NavimowCommunicationException.class,
-                () -> connection.connect(info, "token", List.of("22AAD2602Y0911")));
+                () -> connection.connect(info, "token", List.of("EXAMPLE0DEVICE1")));
     }
 
     @Test
@@ -59,7 +59,7 @@ class NavimowMqttConnectionTest {
         info.mqttHost = "wss://mqtt-fra.navimow.com";
 
         assertThrows(NavimowCommunicationException.class,
-                () -> connection.connect(info, "token", List.of("22AAD2602Y0911")));
+                () -> connection.connect(info, "token", List.of("EXAMPLE0DEVICE1")));
     }
 
     private static void fail(String message) {

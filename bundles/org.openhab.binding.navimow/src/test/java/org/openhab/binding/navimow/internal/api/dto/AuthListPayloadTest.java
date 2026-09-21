@@ -43,7 +43,7 @@ class AuthListPayloadTest {
                     "requestId": "07ae0df4-e700-47f4-81d0-3cfde662f80d",
                     "payload": {
                       "devices": [
-                        { "id": "22AAD2602Y0911", "name": "Navimow X430", "model": "X430", "firmware": "005D" }
+                        { "id": "EXAMPLE0DEVICE1", "name": "Navimow X430", "model": "X430", "firmware": "005D" }
                       ]
                     }
                   }
@@ -58,7 +58,7 @@ class AuthListPayloadTest {
         assertThat(envelope.data.payload.devices, hasSize(1));
 
         NavimowDevice device = envelope.data.payload.devices.get(0);
-        assertThat(device.id, is("22AAD2602Y0911"));
+        assertThat(device.id, is("EXAMPLE0DEVICE1"));
         assertThat(device.name, is("Navimow X430"));
         assertThat(device.model, is("X430"));
         assertThat(device.firmware, is("005D"));

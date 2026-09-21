@@ -19,9 +19,10 @@ import org.eclipse.jdt.annotation.Nullable;
  *
  * <p>
  * <b>Live-confirmed 2026-09-15</b> against a real account/device (Navimow X430) - every field here
- * reflects the exact, complete real response, not an inference:
+ * reflects the exact, complete real response (device id replaced with a placeholder), not an
+ * inference:
  *
- * <pre>{@code {"id":"22AAD2602Y0911","name":"Navimow X430","model":"X430","firmware":"005D"}}</pre>
+ * <pre>{@code {"id":"EXAMPLE0DEVICE1","name":"Navimow X430","model":"X430","firmware":"005D"}}</pre>
  *
  * <p>
  * <b>There is no {@code online} field.</b> An earlier version of this class had one (defaulting to

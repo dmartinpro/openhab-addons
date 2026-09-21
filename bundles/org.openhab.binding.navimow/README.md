@@ -68,7 +68,7 @@ poll cycle:
 
 ```java
 Bridge navimow:account:myaccount [ pollingInterval=60, enableMqtt=false ] {
-    Thing mower mymower [ id="22AAD2602Y0911" ]
+    Thing mower mymower [ id="EXAMPLE0DEVICE1" ]
 }
 ```
 
